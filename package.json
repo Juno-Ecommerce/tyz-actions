@@ -1,0 +1,22 @@
+{
+  "name": "tyz-actions",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "prepare": "husky",
+    "precommit": "pnpm run build",
+    "build": "tsc server.ts",
+    "start": "node server.js"
+  },
+  "dependencies": {
+    "@octokit/app": "^15",
+    "@octokit/request": "^8",
+    "@octokit/webhooks": "^12",
+    "husky": "^9.1.7",
+    "tiny-invariant": "^1.3.3"
+  },
+  "devDependencies": {
+    "@types/node": "^24.5.2",
+    "typescript": "^5.9.2"
+  }
+}
