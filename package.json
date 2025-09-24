@@ -1,7 +1,6 @@
 {
   "name": "tyz-actions",
   "private": true,
-  "type": "module",
   "scripts": {
     "prepare": "husky",
     "precommit": "pnpm run build",
