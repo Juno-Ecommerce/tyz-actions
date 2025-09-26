@@ -4,7 +4,9 @@ import invariant from "tiny-invariant";
 import { createHmac, timingSafeEqual } from "node:crypto";
 import { IncomingMessage, ServerResponse } from "node:http";
 
-import { handleSgcProductionPush } from "./processes/handle-sgc-production-push.js";
+import { updateParentOnSGCPush } from "./processes/update-parent-on-sgc-push.js";
+import { updateStagingOnProductionPush } from "./processes/update-staging-on-production-push.js";
+import { updateSGCOnProductionPush } from "./processes/update-sgc-on-production-push.js";
 
 const { APP_ID, PRIVATE_KEY, WEBHOOK_SECRET } = process.env;
 invariant(APP_ID, "APP_ID required");
@@ -36,20 +38,108 @@ webhooks.on("push", async ({ id, name, payload }) => {
 
   const octokit = await app.getInstallationOctokit(Number(installationId));
 
-  // Temporary: Only run on tryzens-core-framework repo
-  if (repo !== "tryzens-core-framework") {
-    console.log(`[${owner}/${repo}] Skipping - not tryzens-core-framework repo`);
+  // Check if repository has sgc-production branch
+  let hasSgcProductionBranch = false;
+  try {
+    await octokit.request("GET /repos/{owner}/{repo}/git/ref/heads/sgc-production", {
+      owner,
+      repo
+    });
+    hasSgcProductionBranch = true;
+    console.log(`[${owner}/${repo}] ✅ sgc-production branch exists`);
+  } catch (error: any) {
+    if (error.status === 404) {
+      console.log(`[${owner}/${repo}] ❌ sgc-production branch does not exist, skipping`);
+      return;
+    }
+    throw error;
+  }
+
+  if (!hasSgcProductionBranch) {
     return;
   }
 
   switch (payload.ref) {
     case "refs/heads/sgc-production":
       if (payload.deleted) break;
-      await handleSgcProductionPush(octokit, owner, repo);
+      await updateParentOnSGCPush(octokit, owner, repo, "production");
+      break;
+    case "refs/heads/sgc-staging":
+      if (payload.deleted) break;
+      await updateParentOnSGCPush(octokit, owner, repo, "staging");
+      break;
+    case "refs/heads/production":
+      if (payload.deleted) break;
+
+      // Handle Staging Updates
+      // Skip staging update if this push came from staging (to avoid circular updates)
+      // Exception: Allow staging updates for merges from branches with 'sync' in the title
+      const isMergeCommit = payload.head_commit?.message?.toLowerCase().includes("merge pull request")
+      if (isMergeCommit) {
+        // Check if this is a merge from a branch with 'sync' in the title
+        const isFromSyncBranch = payload.head_commit?.message?.toLowerCase().includes("/sync/horizon")
+
+        if (isFromSyncBranch) {
+          console.log(`[${owner}/${repo}] Allowing staging update for merge from sync branch`);
+          await updateStagingOnProductionPush(octokit, owner, repo);
+        } else {
+          console.log(`[${owner}/${repo}] Skipping staging update for merge commit to avoid circular updates`);
+        }
+      } else {
+        await updateStagingOnProductionPush(octokit, owner, repo);
+      }
       break;
     default:
       return;
   }
+});
+
+webhooks.on("pull_request", async ({ id, name, payload }) => {
+  console.log(`[webhook] ${name} id=${id} repo=${payload.repository.full_name} action=${payload.action} merged=${payload.pull_request.merged} target=${payload.pull_request.base.ref} source=${payload.pull_request.head.ref}`);
+
+  // Only process when PR is merged into production
+  if (payload.action !== "closed" || !payload.pull_request.merged || payload.pull_request.base.ref !== "production") {
+    return;
+  }
+
+  const installationId = payload.installation?.id;
+  const owner = payload.repository.owner.login;
+  const repo = payload.repository.name;
+
+  if (!checkInstallationId(payload)) return;
+
+  const octokit = await app.getInstallationOctokit(Number(installationId));
+
+  // Check if repository has sgc-production branch
+  let hasSgcProductionBranch = false;
+  try {
+    await octokit.request("GET /repos/{owner}/{repo}/git/ref/heads/sgc-production", {
+      owner,
+      repo
+    });
+    hasSgcProductionBranch = true;
+    console.log(`[${owner}/${repo}] ✅ sgc-production branch exists`);
+  } catch (error: any) {
+    if (error.status === 404) {
+      console.log(`[${owner}/${repo}] ❌ sgc-production branch does not exist, skipping`);
+      return;
+    }
+    throw error;
+  }
+
+  if (!hasSgcProductionBranch) {
+    return;
+  }
+
+  // Check if PR description/body indicates we should include JSON files
+  const prBody = payload.pull_request.body?.toLowerCase() || '';
+  const shouldIncludeJson = prBody.includes('[include-json]') || prBody.includes('[sync-json]');
+
+  console.log(`[${owner}/${repo}] Including JSON files: ${shouldIncludeJson}`);
+
+  // Update sgc-production when production is updated
+  // Note: staging updates are handled by the push webhook, not here
+  await updateSGCOnProductionPush(octokit, owner, repo, shouldIncludeJson);
 });
 
 webhooks.onError((err) => {
