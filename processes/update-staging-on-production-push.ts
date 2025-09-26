@@ -43,6 +43,21 @@ export async function updateStagingOnProductionPush(octokit: any, owner: string,
       return;
     }
 
+    // Check if staging is already based on production (proper rebase check)
+    // Get the merge base between staging and production
+    const mergeBase = await octokit.request("POST /repos/{owner}/{repo}/git/merge-base", {
+      owner,
+      repo,
+      base: stagingSha,
+      head: productionSha
+    });
+
+    // If staging is already based on production, no rebase needed
+    if (mergeBase.data.sha === productionSha) {
+      console.log(`[${owner}/${repo}] Staging is already based on production`);
+      return;
+    }
+
     // Get the production commit to get its tree SHA
     const productionCommit = await octokit.request("GET /repos/{owner}/{repo}/git/commits/{commit_sha}", {
       owner,
@@ -51,20 +66,21 @@ export async function updateStagingOnProductionPush(octokit: any, owner: string,
     });
 
     // Create a new commit that rebases staging onto production
-    // This creates a commit with production's tree but staging as the parent
+    // This creates a commit with production's tree and production as the parent (proper rebase)
     const rebaseCommit = await octokit.request("POST /repos/{owner}/{repo}/git/commits", {
       owner,
       repo,
       message: `Rebase staging onto production (${productionSha.slice(0, 7)})`,
       tree: productionCommit.data.tree.sha, // Use production's tree SHA
-      parents: [stagingSha] // Keep staging as parent for history
+      parents: [productionSha] // Use production as parent (proper rebase)
     });
 
-    // Update the staging branch to point to the new rebase commit
+    // Force update the staging branch to point to the new rebase commit
     await octokit.request("PATCH /repos/{owner}/{repo}/git/refs/heads/staging", {
       owner,
       repo,
-      sha: rebaseCommit.data.sha
+      sha: rebaseCommit.data.sha,
+      force: true // Force push to overwrite staging history
     });
 
     console.log(`[${owner}/${repo}] Successfully rebased staging onto production`);
