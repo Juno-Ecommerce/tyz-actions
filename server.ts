@@ -37,9 +37,24 @@ webhooks.on("push", async ({ id, name, payload }) => {
 
   const octokit = await app.getInstallationOctokit(Number(installationId));
 
-  // Temporary: Only run on tryzens-core-framework repo
-  if (repo !== "tryzens-core-framework") {
-    console.log(`[${owner}/${repo}] Skipping - not tryzens-core-framework repo`);
+  // Check if repository has sgc-production branch
+  let hasSgcProductionBranch = false;
+  try {
+    await octokit.request("GET /repos/{owner}/{repo}/git/ref/heads/sgc-production", {
+      owner,
+      repo
+    });
+    hasSgcProductionBranch = true;
+    console.log(`[${owner}/${repo}] ✅ sgc-production branch exists`);
+  } catch (error: any) {
+    if (error.status === 404) {
+      console.log(`[${owner}/${repo}] ❌ sgc-production branch does not exist, skipping`);
+      return;
+    }
+    throw error;
+  }
+
+  if (!hasSgcProductionBranch) {
     return;
   }
 
