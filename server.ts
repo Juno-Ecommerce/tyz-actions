@@ -4,7 +4,8 @@ import invariant from "tiny-invariant";
 import { createHmac, timingSafeEqual } from "node:crypto";
 import { IncomingMessage, ServerResponse } from "node:http";
 
-import { handleSgcProductionPush } from "./processes/handle-sgc-production-push.js";
+import { updateProductionOnSGCPush } from "./processes/update-production-on-sgc-push.js";
+import { updateStagingOnProductionPush } from "./processes/update-staging-on-production-push.js";
 
 const { APP_ID, PRIVATE_KEY, WEBHOOK_SECRET } = process.env;
 invariant(APP_ID, "APP_ID required");
@@ -45,7 +46,11 @@ webhooks.on("push", async ({ id, name, payload }) => {
   switch (payload.ref) {
     case "refs/heads/sgc-production":
       if (payload.deleted) break;
-      await handleSgcProductionPush(octokit, owner, repo);
+      await updateProductionOnSGCPush(octokit, owner, repo);
+      break;
+    case "refs/heads/production":
+      if (payload.deleted) break;
+      await updateStagingOnProductionPush(octokit, owner, repo);
       break;
     default:
       return;

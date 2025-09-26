@@ -1,4 +1,4 @@
-export async function handleSgcProductionPush(octokit: any, owner: string, repo: string) {
+export async function updateProductionOnSGCPush(octokit: any, owner: string, repo: string) {
   try {
     // Get the latest commit SHA from sgc-production branch
     const sgcProductionRef = await octokit.request("GET /repos/{owner}/{repo}/git/ref/heads/sgc-production", {
