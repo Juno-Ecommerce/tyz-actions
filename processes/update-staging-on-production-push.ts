@@ -43,20 +43,20 @@ export async function updateStagingOnProductionPush(octokit: any, owner: string,
       return;
     }
 
-    // Get the staging commit to use as the base for rebase
-    const stagingCommit = await octokit.request("GET /repos/{owner}/{repo}/git/commits/{commit_sha}", {
+    // Get the production commit to get its tree SHA
+    const productionCommit = await octokit.request("GET /repos/{owner}/{repo}/git/commits/{commit_sha}", {
       owner,
       repo,
-      commit_sha: stagingSha
+      commit_sha: productionSha
     });
 
     // Create a new commit that rebases staging onto production
-    // This creates a commit with production as the tree but staging as the parent
+    // This creates a commit with production's tree but staging as the parent
     const rebaseCommit = await octokit.request("POST /repos/{owner}/{repo}/git/commits", {
       owner,
       repo,
       message: `Rebase staging onto production (${productionSha.slice(0, 7)})`,
-      tree: productionSha, // Use production's tree
+      tree: productionCommit.data.tree.sha, // Use production's tree SHA
       parents: [stagingSha] // Keep staging as parent for history
     });
 
