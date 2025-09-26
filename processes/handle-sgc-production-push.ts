@@ -30,7 +30,7 @@ export async function handleSgcProductionPush(octokit: any, owner: string, repo:
     ];
 
     // Filter for JSON files, excluding specified files
-    const jsonFiles = sgcProductionTree.data.tree.filter((item: any) => 
+    const jsonFiles = sgcProductionTree.data.tree.filter((item: any) =>
       item.type === "blob" && 
       item.path.endsWith('.json') &&
       !excludedFiles.some(excluded => item.path.endsWith(excluded))
@@ -66,6 +66,13 @@ export async function handleSgcProductionPush(octokit: any, owner: string, repo:
     for (const jsonFile of jsonFiles) {
       // Check if this file exists in production
       if (productionFiles.has(jsonFile.path)) {
+        // Check if the file content is different
+        const productionFileSha = productionFiles.get(jsonFile.path);
+        if (productionFileSha === jsonFile.sha) {
+          console.log(`[${owner}/${repo}] File ${jsonFile.path} is already up to date, skipping`);
+          continue;
+        }
+
         // Get the blob content from sgc-production
         const blob = await octokit.request("GET /repos/{owner}/{repo}/git/blobs/{file_sha}", {
           owner,
