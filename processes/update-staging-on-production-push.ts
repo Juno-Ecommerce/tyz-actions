@@ -43,21 +43,6 @@ export async function updateStagingOnProductionPush(octokit: any, owner: string,
       return;
     }
 
-    // Check if staging is already based on production (proper rebase check)
-    // Get the merge base between staging and production
-    const mergeBase = await octokit.request("POST /repos/{owner}/{repo}/git/merge-base", {
-      owner,
-      repo,
-      base: stagingSha,
-      head: productionSha
-    });
-
-    // If staging is already based on production, no rebase needed
-    if (mergeBase.data.sha === productionSha) {
-      console.log(`[${owner}/${repo}] Staging is already based on production`);
-      return;
-    }
-
     // Get the production commit to get its tree SHA
     const productionCommit = await octokit.request("GET /repos/{owner}/{repo}/git/commits/{commit_sha}", {
       owner,
@@ -75,12 +60,11 @@ export async function updateStagingOnProductionPush(octokit: any, owner: string,
       parents: [productionSha] // Use production as parent (proper rebase)
     });
 
-    // Force update the staging branch to point to the new rebase commit
+    // Update the staging branch to point to the new rebase commit
     await octokit.request("PATCH /repos/{owner}/{repo}/git/refs/heads/staging", {
       owner,
       repo,
-      sha: rebaseCommit.data.sha,
-      force: true // Force push to overwrite staging history
+      sha: rebaseCommit.data.sha
     });
 
     console.log(`[${owner}/${repo}] Successfully rebased staging onto production`);
