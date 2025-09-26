@@ -24,9 +24,16 @@ export async function handleSgcProductionPush(octokit: any, owner: string, repo:
       recursive: "true"
     });
 
-    // Filter for JSON files
+    // Files to exclude from sync
+    const excludedFiles = [
+      'settings_schema.json'
+    ];
+
+    // Filter for JSON files, excluding specified files
     const jsonFiles = sgcProductionTree.data.tree.filter((item: any) => 
-      item.type === "blob" && item.path.endsWith('.json')
+      item.type === "blob" && 
+      item.path.endsWith('.json') &&
+      !excludedFiles.some(excluded => item.path.endsWith(excluded))
     );
 
     console.log(`[${owner}/${repo}] Found ${jsonFiles.length} JSON files in sgc-production`);
