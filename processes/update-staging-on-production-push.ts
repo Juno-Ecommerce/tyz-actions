@@ -60,32 +60,18 @@ export async function updateStagingOnProductionPush(octokit: any, owner: string,
       parents: [productionSha] // Use production as parent (proper rebase)
     });
 
-    // Update the staging branch to point to the new rebase commit
+    // Force update the staging branch to point to the new rebase commit
     await octokit.request("PATCH /repos/{owner}/{repo}/git/refs/heads/staging", {
       owner,
       repo,
-      sha: rebaseCommit.data.sha
+      sha: rebaseCommit.data.sha,
+      force: true // Force update to allow non-fast-forward updates (required for rebase)
     });
 
     console.log(`[${owner}/${repo}] Successfully rebased staging onto production`);
 
   } catch (error: any) {
     console.error(`[${owner}/${repo}] Error rebasing staging onto production:`, error.message);
-
-    // If rebase fails due to conflicts, try a merge approach
-    if (error.status === 422 || error.message.includes('conflict')) {
-      try {
-        await octokit.request("POST /repos/{owner}/{repo}/merges", {
-          owner,
-          repo,
-          base: "staging",
-          head: "production",
-          commit_message: "Merge production into staging (fallback from rebase)"
-        });
-        console.log(`[${owner}/${repo}] Fallback: merged production into staging`);
-      } catch (mergeError: any) {
-        console.error(`[${owner}/${repo}] Fallback merge also failed:`, mergeError.message);
-      }
-    }
+    throw error; 
   }
 }
