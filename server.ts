@@ -144,9 +144,12 @@ webhooks.on("pull_request", async ({ id, name, payload }) => {
 
   // Check if PR description/body indicates we should include JSON files
   const prBody = payload.pull_request.body?.toLowerCase() || '';
-  const shouldIncludeJson = prBody.includes('[include-json]') || prBody.includes('[sync-json]');
+  const prHeadRef = payload.pull_request.head.ref?.toLowerCase() || '';
+  const shouldIncludeJson = prBody.includes('[include-json]') || 
+                           prBody.includes('[sync-json]') || 
+                           prHeadRef.includes('sync/horizon-');
 
-  console.log(`[${owner}/${repo}] Including JSON files: ${shouldIncludeJson}`);
+  console.log(`[${owner}/${repo}] Including JSON files: ${shouldIncludeJson} (PR head ref: ${payload.pull_request.head.ref})`);
 
   // Update sgc-production when production is updated
   // Note: staging updates are handled by the push webhook, not here

@@ -27,7 +27,7 @@ export async function updateSGCOnProductionPush(octokit: any, owner: string, rep
     // Define the specific Shopify folders to sync
     const shopifyFolders = [
       'assets',
-      'blocks', 
+      'blocks',
       'config',
       'layout',
       'locales',
