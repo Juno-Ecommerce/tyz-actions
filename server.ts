@@ -100,7 +100,7 @@ webhooks.on("push", async ({ id, name, payload }) => {
 
       break;
     case "refs/heads/staging":
-      
+      await updateSGCOnParentPush(octokit, owner, repo, false, "staging");
     default:
       return;
   }
