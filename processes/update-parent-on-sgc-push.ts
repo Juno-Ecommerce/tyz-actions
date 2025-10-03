@@ -16,7 +16,7 @@ export async function updateParentOnSGCPush(octokit: any, owner: string, repo: s
 
     const parentSha = parentRef.data.object.sha;
 
-    // Get the tree of sgc branch to find all JSON files
+    // Get the tree of sgc branch to find all files
     const sgcTree = await octokit.request("GET /repos/{owner}/{repo}/git/trees/{tree_sha}", {
       owner,
       repo,
@@ -24,13 +24,13 @@ export async function updateParentOnSGCPush(octokit: any, owner: string, repo: s
       recursive: "true"
     });
 
-    // Filter for JSON files, excluding specified files
+    // Filter for files, excluding specified files
     const sgcFiles = sgcTree.data.tree.filter((item: any) => item.type === "blob");
 
-    console.log(`[${owner}/${repo}] Found ${sgcFiles.length} JSON files in sgc-${parent}`);
+    console.log(`[${owner}/${repo}] Found ${sgcFiles.length} files in sgc-${parent}`);
 
     if (sgcFiles.length === 0) {
-      console.log(`[${owner}/${repo}] No JSON files found in sgc-${parent}`);
+      console.log(`[${owner}/${repo}] No files found in sgc-${parent}`);
       return;
     }
 
@@ -60,7 +60,7 @@ export async function updateParentOnSGCPush(octokit: any, owner: string, repo: s
         // Check if the file content is different
         const productionFileSha = parentFiles.get(sgcFile.path);
         if (productionFileSha === sgcFile.sha) {
-          console.log(`[${owner}/${repo}] File ${sgcFile.path} is already up to date, skipping`);
+          // File is already up to date, skipping
           continue;
         }
 
@@ -95,7 +95,7 @@ export async function updateParentOnSGCPush(octokit: any, owner: string, repo: s
     }
 
     if (treeUpdates.length === 0) {
-      console.log(`[${owner}/${repo}] No JSON files to update in production`);
+      console.log(`[${owner}/${repo}] No files to update in production`);
       return;
     }
 
@@ -123,10 +123,10 @@ export async function updateParentOnSGCPush(octokit: any, owner: string, repo: s
       sha: newCommit.data.sha
     });
 
-    console.log(`[${owner}/${repo}] Successfully synced ${filesUpdated} JSON files from sgc-${parent} to production`);
+    console.log(`[${owner}/${repo}] Successfully synced ${filesUpdated} files from sgc-${parent} to production`);
 
   } catch (error: any) {
-    console.error(`[${owner}/${repo}] Error syncing JSON files from sgc-${parent}:`, error.message);
+    console.error(`[${owner}/${repo}] Error syncing files from sgc-${parent}:`, error.message);
 
     // If sync fails, try a simpler approach - create a merge commit
     if (error.status === 422 || error.message.includes('conflict')) {
@@ -136,7 +136,7 @@ export async function updateParentOnSGCPush(octokit: any, owner: string, repo: s
           repo,
           base: parent,
           head: `sgc-${parent}`,
-          commit_message: `Merge sgc-${parent} into ${parent} (fallback from JSON sync)`
+          commit_message: `Merge sgc-${parent} into ${parent}`
         });
         console.log(`[${owner}/${repo}] Fallback: merged sgc-${parent} into ${parent}`);
       } catch (mergeError: any) {
