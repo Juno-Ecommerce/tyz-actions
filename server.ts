@@ -86,7 +86,7 @@ webhooks.on("push", async ({ id, name, payload }) => {
 
       const horizonUpdate = headCommitMessage.includes("merge pull request") && headCommitMessage.includes("/sync/horizon");
       const stagingUpdate = headCommitMessage.includes("merge pull request") && headCommitMessage.includes("/staging");
-      const sgcUpdate = headCommitMessage.includes("sync json files from sgc-production");
+      const sgcUpdate = headCommitMessage.includes("sync files from sgc-production");
 
       if (horizonUpdate || stagingUpdate) {
         await mergeFromHorizonSyncOrStaging();
