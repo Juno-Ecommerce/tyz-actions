@@ -69,25 +69,33 @@ webhooks.on("push", async ({ id, name, payload }) => {
       await updateParentOnSGCPush(octokit, owner, repo, "staging");
       break;
     case "refs/heads/production":
-      if (payload.deleted) break;
+      if (payload.deleted || !payload.head_commit || !payload.head_commit.message) break;
 
-      // Handle Staging Updates
-      // Skip staging update if this push came from staging (to avoid circular updates)
-      // Exception: Allow staging updates for merges from branches with 'sync' in the title
-      const isMergeCommit = payload.head_commit?.message?.toLowerCase().includes("merge pull request")
-      if (isMergeCommit) {
-        // Check if this is a merge from a branch with 'sync' in the title
-        const isFromSyncBranch = payload.head_commit?.message?.toLowerCase().includes("/sync/horizon")
-
-        if (isFromSyncBranch) {
-          console.log(`[${owner}/${repo}] Allowing staging update for merge from sync branch`);
-          await updateStagingOnProductionPush(octokit, owner, repo);
-        } else {
-          console.log(`[${owner}/${repo}] Skipping staging update for merge commit to avoid circular updates`);
-        }
-      } else {
+      const productionUpdatedFromSGC = async () => {
+        console.log(`[${owner}/${repo}] Production Update from SGC! Rebasing Staging Onto Production`);
         await updateStagingOnProductionPush(octokit, owner, repo);
       }
+
+      const mergeFromHorizonSyncOrStaging = async () => {
+        console.log(`[${owner}/${repo}] Merge From Horizon Sync or Staging! Rebasing Staging Onto Production`);
+        await updateStagingOnProductionPush(octokit, owner, repo);
+      }
+
+      // Handle Staging Updates
+      const headCommitMessage = payload.head_commit.message.toLowerCase();
+
+      const horizonUpdate = headCommitMessage.includes("merge pull request") && headCommitMessage.includes("/sync/horizon");
+      const stagingUpdate = headCommitMessage.includes("merge pull request") && headCommitMessage.includes("/staging");
+      const sgcUpdate = headCommitMessage.includes("sync json files from sgc-production");
+
+      if (horizonUpdate || stagingUpdate) {
+        await mergeFromHorizonSyncOrStaging();
+      } else if (sgcUpdate) {
+        await productionUpdatedFromSGC();
+      } else {
+        console.log(`[${owner}/${repo}] Skipping staging update for merge commit to avoid circular updates`);
+      }
+
       break;
     default:
       return;

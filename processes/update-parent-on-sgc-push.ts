@@ -111,7 +111,7 @@ export async function updateParentOnSGCPush(octokit: any, owner: string, repo: s
     const newCommit = await octokit.request("POST /repos/{owner}/{repo}/git/commits", {
       owner,
       repo,
-      message: `Sync JSON files from sgc-${parent} (${filesUpdated} files updated)`,
+      message: `Sync files from sgc-${parent} (${filesUpdated} files updated)`,
       tree: newTree.data.sha,
       parents: [parentSha]
     });
