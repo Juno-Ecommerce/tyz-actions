@@ -9,7 +9,7 @@ export async function updateParentOnSGCPush(octokit: any, owner: string, repo: s
     const sgcSha = sgcRef.data.object.sha;
 
     // Get the current parent branch SHA
-    const parentRef = await octokit.request("GET /repos/{owner}/{repo}/git/ref/heads/production", {
+    const parentRef = await octokit.request(`GET /repos/{owner}/{repo}/git/ref/heads/${parent}`, {
       owner,
       repo
     });
@@ -45,7 +45,7 @@ export async function updateParentOnSGCPush(octokit: any, owner: string, repo: s
       return;
     }
 
-    // Get the current production tree
+    // Get the current parent tree
     const parentTree = await octokit.request("GET /repos/{owner}/{repo}/git/trees/{tree_sha}", {
       owner,
       repo,
@@ -53,7 +53,7 @@ export async function updateParentOnSGCPush(octokit: any, owner: string, repo: s
       recursive: "true"
     });
 
-    // Create a map of existing files in production
+    // Create a map of existing files in parent
     const parentFiles = new Map();
     parentTree.data.tree.forEach((item: any) => {
       if (item.type === "blob") {
@@ -66,11 +66,11 @@ export async function updateParentOnSGCPush(octokit: any, owner: string, repo: s
     let filesUpdated = 0;
 
     for (const sgcFile of sgcFiles) {
-      // Check if this file exists in production
+      // Check if this file exists in parent
       if (parentFiles.has(sgcFile.path)) {
         // Check if the file content is different
-        const productionFileSha = parentFiles.get(sgcFile.path);
-        if (productionFileSha === sgcFile.sha) {
+        const parentFileSha = parentFiles.get(sgcFile.path);
+        if (parentFileSha === sgcFile.sha) {
           // File is already up to date, skipping
           continue;
         }
@@ -82,7 +82,7 @@ export async function updateParentOnSGCPush(octokit: any, owner: string, repo: s
           file_sha: sgcFile.sha
         });
 
-        // Create a new blob in production with the content from sgc
+        // Create a new blob in parent with the content from sgc
         const newBlob = await octokit.request("POST /repos/{owner}/{repo}/git/blobs", {
           owner,
           repo,
@@ -101,12 +101,12 @@ export async function updateParentOnSGCPush(octokit: any, owner: string, repo: s
         filesUpdated++;
         console.log(`[${owner}/${repo}] Updated ${sgcFile.path}`);
       } else {
-        console.log(`[${owner}/${repo}] File ${sgcFile.path} not found in production, skipping`);
+        console.log(`[${owner}/${repo}] File ${sgcFile.path} not found in ${parent}, skipping`);
       }
     }
 
     if (treeUpdates.length === 0) {
-      console.log(`[${owner}/${repo}] No files to update in production`);
+      console.log(`[${owner}/${repo}] No files to update in ${parent}`);
       return;
     }
 
@@ -127,14 +127,14 @@ export async function updateParentOnSGCPush(octokit: any, owner: string, repo: s
       parents: [parentSha]
     });
 
-    // Update the production branch to point to the new commit
-    await octokit.request("PATCH /repos/{owner}/{repo}/git/refs/heads/production", {
+    // Update the parent branch to point to the new commit
+    await octokit.request(`PATCH /repos/{owner}/{repo}/git/refs/heads/${parent}`, {
       owner,
       repo,
       sha: newCommit.data.sha
     });
 
-    console.log(`[${owner}/${repo}] Successfully synced ${filesUpdated} files from sgc-${parent} to production`);
+    console.log(`[${owner}/${repo}] Successfully synced ${filesUpdated} files from sgc-${parent} to ${parent}`);
 
   } catch (error: any) {
     console.error(`[${owner}/${repo}] Error syncing files from sgc-${parent}:`, error.message);
