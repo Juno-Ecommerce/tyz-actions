@@ -6,7 +6,7 @@ import { IncomingMessage, ServerResponse } from "node:http";
 
 import { updateParentOnSGCPush } from "./processes/update-parent-on-sgc-push.js";
 import { updateStagingOnProductionPush } from "./processes/update-staging-on-production-push.js";
-import { updateSGCOnProductionPush } from "./processes/update-sgc-on-production-push.js";
+import { updateSGCOnParentPush } from "./processes/update-sgc-on-parent-push.js";
 
 const { APP_ID, PRIVATE_KEY, WEBHOOK_SECRET } = process.env;
 invariant(APP_ID, "APP_ID required");
@@ -99,6 +99,8 @@ webhooks.on("push", async ({ id, name, payload }) => {
       }
 
       break;
+    case "refs/heads/staging":
+      
     default:
       return;
   }
@@ -125,15 +127,15 @@ webhooks.on("pull_request", async ({ id, name, payload }) => {
   // Check if PR description/body indicates we should include JSON files
   const prBody = payload.pull_request.body?.toLowerCase() || '';
   const prHeadRef = payload.pull_request.head.ref?.toLowerCase() || '';
-  const shouldIncludeJson = prBody.includes('[include-json]') || 
-                           prBody.includes('[sync-json]') || 
-                           prHeadRef.includes('sync/horizon-');
+  const shouldIncludeJson = prBody.includes('[include-json]') ||
+                            prBody.includes('[sync-json]') ||
+                            prHeadRef.includes('sync/horizon-');
 
   if (debug) console.log(`[${owner}/${repo}] Including JSON files: ${shouldIncludeJson} (PR head ref: ${payload.pull_request.head.ref})`);
 
   // Update sgc-production when production is updated
   // Note: staging updates are handled by the push webhook, not here
-  await updateSGCOnProductionPush(octokit, owner, repo, shouldIncludeJson);
+  await updateSGCOnParentPush(octokit, owner, repo, shouldIncludeJson, "production");
 });
 
 webhooks.onError((err) => {

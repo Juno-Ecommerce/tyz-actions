@@ -1,26 +1,26 @@
-export async function updateSGCOnProductionPush(octokit: any, owner: string, repo: string, includeJsonFiles: boolean = false) {
+export async function updateSGCOnParentPush(octokit: any, owner: string, repo: string, includeJsonFiles: boolean = false, parent: "staging" | "production") {
   try {
-    // Get the latest commit SHA from production branch
-    const productionRef = await octokit.request("GET /repos/{owner}/{repo}/git/ref/heads/production", {
+    // Get the latest commit SHA from ${parent} branch
+    const parentRef = await octokit.request(`GET /repos/{owner}/{repo}/git/ref/heads/${parent}`, {
       owner,
       repo
     });
 
-    const productionSha = productionRef.data.object.sha;
+    const parentSha = parentRef.data.object.sha;
 
-    // Get the latest commit SHA from sgc-production branch
-    const sgcProductionRef = await octokit.request("GET /repos/{owner}/{repo}/git/ref/heads/sgc-production", {
+    // Get the latest commit SHA from sgc-${parent} branch
+    const sgcRef = await octokit.request(`GET /repos/{owner}/{repo}/git/ref/heads/sgc-${parent}`, {
       owner,
       repo
     });
 
-    const sgcProductionSha = sgcProductionRef.data.object.sha;
+    const sgcSha = sgcRef.data.object.sha;
 
-    // Get the production tree to find Shopify-specific folders
-    const productionTree = await octokit.request("GET /repos/{owner}/{repo}/git/trees/{tree_sha}", {
+    // Get the parent tree to find Shopify-specific folders
+    const parentTree = await octokit.request("GET /repos/{owner}/{repo}/git/trees/{tree_sha}", {
       owner,
       repo,
-      tree_sha: productionSha,
+      tree_sha: parentSha,
       recursive: "true"
     });
 
@@ -37,7 +37,7 @@ export async function updateSGCOnProductionPush(octokit: any, owner: string, rep
     ];
 
     // Filter for files in the specified Shopify folders, excluding JSON files
-    const shopifyFiles = productionTree.data.tree.filter((item: any) => {
+    const shopifyFiles = parentTree.data.tree.filter((item: any) => {
       if (item.type !== "blob") return false;
 
       // Check if file is in one of the specified folders
@@ -54,26 +54,26 @@ export async function updateSGCOnProductionPush(octokit: any, owner: string, rep
       return isInShopifyFolder && isNotJson;
     });
 
-    console.log(`[${owner}/${repo}] Found ${shopifyFiles.length} Shopify files in production to sync`);
+    console.log(`[${owner}/${repo}] Found ${shopifyFiles.length} Shopify files in ${parent} to sync`);
 
     if (shopifyFiles.length === 0) {
-      console.log(`[${owner}/${repo}] No Shopify files found in production to sync`);
+      console.log(`[${owner}/${repo}] No Shopify files found in ${parent} to sync`);
       return;
     }
 
-    // Get the current sgc-production tree
-    const sgcProductionTree = await octokit.request("GET /repos/{owner}/{repo}/git/trees/{tree_sha}", {
+    // Get the current sgc-${parent} tree
+    const sgcTree = await octokit.request("GET /repos/{owner}/{repo}/git/trees/{tree_sha}", {
       owner,
       repo,
-      tree_sha: sgcProductionSha,
+      tree_sha: sgcSha,
       recursive: "true"
     });
 
-    // Create a map of existing files in sgc-production
-    const sgcProductionFiles = new Map();
-    sgcProductionTree.data.tree.forEach((item: any) => {
+    // Create a map of existing files in sgc-${parent}
+    const sgcFiles = new Map();
+    sgcTree.data.tree.forEach((item: any) => {
       if (item.type === "blob") {
-        sgcProductionFiles.set(item.path, item.sha);
+        sgcFiles.set(item.path, item.sha);
       }
     });
 
@@ -83,24 +83,24 @@ export async function updateSGCOnProductionPush(octokit: any, owner: string, rep
     let filesAdded = 0;
 
     for (const shopifyFile of shopifyFiles) {
-      // Check if this file exists in sgc-production
-      if (sgcProductionFiles.has(shopifyFile.path)) {
+      // Check if this file exists in sgc-${parent}
+      if (sgcFiles.has(shopifyFile.path)) {
         // Check if the file content is different
-        const sgcFileSha = sgcProductionFiles.get(shopifyFile.path);
+        const sgcFileSha = sgcFiles.get(shopifyFile.path);
         if (sgcFileSha === shopifyFile.sha) {
           console.log(`[${owner}/${repo}] File ${shopifyFile.path} is already up to date, skipping`);
           continue;
         }
       }
 
-      // Get the blob content from production
+      // Get the blob content from ${parent}
       const blob = await octokit.request("GET /repos/{owner}/{repo}/git/blobs/{file_sha}", {
         owner,
         repo,
         file_sha: shopifyFile.sha
       });
 
-      // Create a new blob in sgc-production with the content from production
+      // Create a new blob in sgc-${parent} with the content from ${parent}
       const newBlob = await octokit.request("POST /repos/{owner}/{repo}/git/blobs", {
         owner,
         repo,
@@ -116,7 +116,7 @@ export async function updateSGCOnProductionPush(octokit: any, owner: string, rep
         sha: newBlob.data.sha
       });
 
-      if (sgcProductionFiles.has(shopifyFile.path)) {
+      if (sgcFiles.has(shopifyFile.path)) {
         filesUpdated++;
         console.log(`[${owner}/${repo}] Updated ${shopifyFile.path}`);
       } else {
@@ -126,7 +126,7 @@ export async function updateSGCOnProductionPush(octokit: any, owner: string, rep
     }
 
     if (treeUpdates.length === 0) {
-      console.log(`[${owner}/${repo}] No Shopify files to update in sgc-production`);
+      console.log(`[${owner}/${repo}] No Shopify files to update in sgc-${parent}`);
       return;
     }
 
@@ -134,7 +134,7 @@ export async function updateSGCOnProductionPush(octokit: any, owner: string, rep
     const newTree = await octokit.request("POST /repos/{owner}/{repo}/git/trees", {
       owner,
       repo,
-      base_tree: sgcProductionSha,
+      base_tree: sgcSha,
       tree: treeUpdates
     });
 
@@ -142,22 +142,22 @@ export async function updateSGCOnProductionPush(octokit: any, owner: string, rep
     const newCommit = await octokit.request("POST /repos/{owner}/{repo}/git/commits", {
       owner,
       repo,
-      message: `Sync Shopify files from production (${filesAdded} added, ${filesUpdated} updated)`,
+      message: `Sync Shopify files from ${parent} (${filesAdded} added, ${filesUpdated} updated)`,
       tree: newTree.data.sha,
-      parents: [sgcProductionSha]
+      parents: [sgcSha]
     });
 
-    // Update the sgc-production branch to point to the new commit
-    await octokit.request("PATCH /repos/{owner}/{repo}/git/refs/heads/sgc-production", {
+    // Update the sgc-${parent} branch to point to the new commit
+    await octokit.request(`PATCH /repos/{owner}/{repo}/git/refs/heads/sgc-${parent}`, {
       owner,
       repo,
       sha: newCommit.data.sha
     });
 
-    console.log(`[${owner}/${repo}] Successfully synced ${filesAdded + filesUpdated} Shopify files from production to sgc-production (${filesAdded} added, ${filesUpdated} updated)`);
+    console.log(`[${owner}/${repo}] Successfully synced ${filesAdded + filesUpdated} Shopify files from ${parent} to sgc-${parent} (${filesAdded} added, ${filesUpdated} updated)`);
 
   } catch (error: any) {
-    console.error(`[${owner}/${repo}] Error syncing Shopify files from production:`, error.message);
+    console.error(`[${owner}/${repo}] Error syncing Shopify files from ${parent}:`, error.message);
 
     // If sync fails, try a simpler approach - create a merge commit
     if (error.status === 422 || error.message.includes('conflict')) {
@@ -165,11 +165,11 @@ export async function updateSGCOnProductionPush(octokit: any, owner: string, rep
         await octokit.request("POST /repos/{owner}/{repo}/merges", {
           owner,
           repo,
-          base: "sgc-production",
-          head: "production",
-          commit_message: "Merge production into sgc-production (fallback from Shopify sync)"
+          base: `sgc-${parent}`,
+          head: parent,
+          commit_message: `Merge ${parent} into sgc-${parent} (fallback from Shopify sync)`
         });
-        console.log(`[${owner}/${repo}] Fallback: merged production into sgc-production`);
+        console.log(`[${owner}/${repo}] Fallback: merged ${parent} into sgc-${parent}`);
       } catch (mergeError: any) {
         console.error(`[${owner}/${repo}] Fallback merge also failed:`, mergeError.message);
       }
