@@ -43,70 +43,32 @@ export async function updateStagingOnProductionPush(octokit: any, owner: string,
       return;
     }
 
-    // Get the merge base between staging and production to find the common ancestor
-    const mergeBase = await octokit.request("GET /repos/{owner}/{repo}/compare/{base}...{head}", {
+    // Get the production commit to get its tree SHA
+    const productionCommit = await octokit.request("GET /repos/{owner}/{repo}/git/commits/{commit_sha}", {
       owner,
       repo,
-      base: "production",
-      head: "staging"
+      commit_sha: productionSha
     });
 
-    const mergeBaseSha = mergeBase.data.merge_base_commit.sha;
+    // Create a new commit that rebases staging onto production
+    // This creates a commit with production's tree and production as the parent (proper rebase)
+    const rebaseCommit = await octokit.request("POST /repos/{owner}/{repo}/git/commits", {
+      owner,
+      repo,
+      message: `Rebase staging onto production (${productionSha.slice(0, 7)})`,
+      tree: productionCommit.data.tree.sha, // Use production's tree SHA
+      parents: [productionSha] // Use production as parent (proper rebase)
+    });
 
-    // If staging is already based on production (no unique commits), just fast-forward
-    if (mergeBaseSha === productionSha) {
-      console.log(`[${owner}/${repo}] Staging has no unique commits, fast-forwarding to production`);
-      await octokit.request("PATCH /repos/{owner}/{repo}/git/refs/heads/staging", {
-        owner,
-        repo,
-        sha: productionSha
-      });
-      return;
-    }
-
-    // Get commits that are in staging but not in production
-    const stagingCommits = mergeBase.data.commits.reverse(); // Reverse to get chronological order
-
-    console.log(`[${owner}/${repo}] Found ${stagingCommits.length} commits to rebase`);
-
-    if (stagingCommits.length === 0) {
-      console.log(`[${owner}/${repo}] No commits to rebase, staging is already up to date`);
-      return;
-    }
-
-    // Start the rebase from production
-    let currentParentSha = productionSha;
-
-    // Replay each staging commit on top of production
-    for (const commit of stagingCommits) {
-      const commitDetails = await octokit.request("GET /repos/{owner}/{repo}/git/commits/{commit_sha}", {
-        owner,
-        repo,
-        commit_sha: commit.sha
-      });
-
-      // Create a new commit with the same message and tree, but with the new parent
-      const rebasedCommit = await octokit.request("POST /repos/{owner}/{repo}/git/commits", {
-        owner,
-        repo,
-        message: commitDetails.data.message,
-        tree: commitDetails.data.tree.sha,
-        parents: [currentParentSha]
-      });
-
-      currentParentSha = rebasedCommit.data.sha;
-      console.log(`[${owner}/${repo}] Rebased commit: ${commit.sha.slice(0, 7)} -> ${currentParentSha.slice(0, 7)}`);
-    }
-
-    // Force update the staging branch to point to the last rebased commit
+    // Force update the staging branch to point to the new rebase commit
     await octokit.request("PATCH /repos/{owner}/{repo}/git/refs/heads/staging", {
       owner,
       repo,
-      sha: currentParentSha,
+      sha: rebaseCommit.data.sha,
       force: true // Force update to allow non-fast-forward updates (required for rebase)
     });
 
-    console.log(`[${owner}/${repo}] Successfully rebased ${stagingCommits.length} commits from staging onto production`);
+    console.log(`[${owner}/${repo}] Successfully rebased staging onto production`);
 
   } catch (error: any) {
     console.error(`[${owner}/${repo}] Error rebasing staging onto production:`, error.message);

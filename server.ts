@@ -16,20 +16,36 @@ invariant(WEBHOOK_SECRET, "WEBHOOK_SECRET required");
 const key = PRIVATE_KEY!.includes("\\n") ? PRIVATE_KEY!.replace(/\\n/g, "\n") : PRIVATE_KEY!;
 const app = new App({ appId: APP_ID!, privateKey: key });
 const webhooks = new Webhooks({ secret: WEBHOOK_SECRET! });
+const debug = false;
 
 function checkInstallationId(payload: any) {
   const installationId = payload.installation?.id;
   if (!installationId) {
-    console.log(`[${payload.repository.owner.login}/${payload.repository.name}] No installation ID found`);
+    if (debug) console.log(`[${payload.repository.owner.login}/${payload.repository.name}] No installation ID found`);
     return false;
   }
 
   return true;
 }
 
-webhooks.on("push", async ({ id, name, payload }) => {
-  console.log(`[webhook] ${name} id=${id} repo=${payload.repository.full_name} ref=${payload.ref}`);
+async function checkSgcProductionBranch(octokit: any, owner: string, repo: string): Promise<boolean> {
+  try {
+    await octokit.request("GET /repos/{owner}/{repo}/git/ref/heads/sgc-production", {
+      owner,
+      repo
+    });
+    if (debug) console.log(`[${owner}/${repo}] ✅ sgc-production branch exists`);
+    return true;
+  } catch (error: any) {
+    if (error.status === 404) {
+      if (debug) console.log(`[${owner}/${repo}] ❌ sgc-production branch does not exist, skipping`);
+      return false;
+    }
+    throw error;
+  }
+}
 
+webhooks.on("push", async ({ id, name, payload }) => {
   const installationId = payload.installation?.id;
   const owner = payload.repository.owner.login;
   const repo = payload.repository.name;
@@ -39,25 +55,8 @@ webhooks.on("push", async ({ id, name, payload }) => {
   const octokit = await app.getInstallationOctokit(Number(installationId));
 
   // Check if repository has sgc-production branch
-  let hasSgcProductionBranch = false;
-  try {
-    await octokit.request("GET /repos/{owner}/{repo}/git/ref/heads/sgc-production", {
-      owner,
-      repo
-    });
-    hasSgcProductionBranch = true;
-    console.log(`[${owner}/${repo}] ✅ sgc-production branch exists`);
-  } catch (error: any) {
-    if (error.status === 404) {
-      console.log(`[${owner}/${repo}] ❌ sgc-production branch does not exist, skipping`);
-      return;
-    }
-    throw error;
-  }
-
-  if (!hasSgcProductionBranch) {
-    return;
-  }
+  const hasSgcProductionBranch = await checkSgcProductionBranch(octokit, owner, repo);
+  if (!hasSgcProductionBranch) return;
 
   if (payload.deleted || !payload.head_commit || !payload.head_commit.message) return;
 
@@ -106,8 +105,6 @@ webhooks.on("push", async ({ id, name, payload }) => {
 });
 
 webhooks.on("pull_request", async ({ id, name, payload }) => {
-  console.log(`[webhook] ${name} id=${id} repo=${payload.repository.full_name} action=${payload.action} merged=${payload.pull_request.merged} target=${payload.pull_request.base.ref} source=${payload.pull_request.head.ref}`);
-
   // Only process when PR is merged into production
   if (payload.action !== "closed" || !payload.pull_request.merged || payload.pull_request.base.ref !== "production") {
     return;
@@ -122,25 +119,8 @@ webhooks.on("pull_request", async ({ id, name, payload }) => {
   const octokit = await app.getInstallationOctokit(Number(installationId));
 
   // Check if repository has sgc-production branch
-  let hasSgcProductionBranch = false;
-  try {
-    await octokit.request("GET /repos/{owner}/{repo}/git/ref/heads/sgc-production", {
-      owner,
-      repo
-    });
-    hasSgcProductionBranch = true;
-    console.log(`[${owner}/${repo}] ✅ sgc-production branch exists`);
-  } catch (error: any) {
-    if (error.status === 404) {
-      console.log(`[${owner}/${repo}] ❌ sgc-production branch does not exist, skipping`);
-      return;
-    }
-    throw error;
-  }
-
-  if (!hasSgcProductionBranch) {
-    return;
-  }
+  const hasSgcProductionBranch = await checkSgcProductionBranch(octokit, owner, repo);
+  if (!hasSgcProductionBranch) return;
 
   // Check if PR description/body indicates we should include JSON files
   const prBody = payload.pull_request.body?.toLowerCase() || '';
@@ -149,7 +129,7 @@ webhooks.on("pull_request", async ({ id, name, payload }) => {
                            prBody.includes('[sync-json]') || 
                            prHeadRef.includes('sync/horizon-');
 
-  console.log(`[${owner}/${repo}] Including JSON files: ${shouldIncludeJson} (PR head ref: ${payload.pull_request.head.ref})`);
+  if (debug) console.log(`[${owner}/${repo}] Including JSON files: ${shouldIncludeJson} (PR head ref: ${payload.pull_request.head.ref})`);
 
   // Update sgc-production when production is updated
   // Note: staging updates are handled by the push webhook, not here
@@ -176,7 +156,6 @@ async function readRawBody(req: IncomingMessage): Promise<Buffer> {
 }
 
 export default async function handler(req: IncomingMessage, res: ServerResponse) {
-  console.log(`[req] ${req.method} ${req.url}`);
   if (req.method !== "POST") { res.statusCode = 200; res.end("ok"); return; }
 
   const raw = await readRawBody(req);
@@ -185,7 +164,6 @@ export default async function handler(req: IncomingMessage, res: ServerResponse)
   const exp = "sha256=" + createHmac("sha256", secret).update(raw).digest("hex");
 
   const eq = got.length === exp.length && timingSafeEqual(Buffer.from(got), Buffer.from(exp));
-  console.log(`[sig] got=${got.slice(0,20)}… exp=${exp.slice(0,20)}… equal=${eq}`);
 
   if (!eq) { res.statusCode = 401; res.end("signature mismatch"); return; }
 
