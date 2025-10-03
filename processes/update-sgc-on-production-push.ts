@@ -45,8 +45,11 @@ export async function updateSGCOnProductionPush(octokit: any, owner: string, rep
         item.path.startsWith(folder + '/') || item.path === folder
       );
 
-      // Conditionally exclude JSON files based on parameter
-      const isNotJson = includeJsonFiles || !item.path.endsWith('.json');
+      // Always include config/settings_schema.json regardless of JSON file filtering
+      const isSettingsSchema = item.path === 'config/settings_schema.json';
+
+      // Conditionally exclude JSON files based on parameter, but always include settings_schema.json
+      const isNotJson = includeJsonFiles || !item.path.endsWith('.json') || isSettingsSchema;
 
       return isInShopifyFolder && isNotJson;
     });
