@@ -59,18 +59,23 @@ webhooks.on("push", async ({ id, name, payload }) => {
     return;
   }
 
+  if (payload.deleted || !payload.head_commit || !payload.head_commit.message) return;
+
+  const headCommitMessage = payload.head_commit.message.toLowerCase();
+
   switch (payload.ref) {
     case "refs/heads/sgc-production":
-      if (payload.deleted) break;
-      await updateParentOnSGCPush(octokit, owner, repo, "production");
+      if (headCommitMessage.includes("update from shopify")) {
+        await updateParentOnSGCPush(octokit, owner, repo, "production");
+      }
+
       break;
     case "refs/heads/sgc-staging":
-      if (payload.deleted) break;
-      await updateParentOnSGCPush(octokit, owner, repo, "staging");
+      if (headCommitMessage.includes("update from shopify")) {
+        await updateParentOnSGCPush(octokit, owner, repo, "staging");
+      }
       break;
     case "refs/heads/production":
-      if (payload.deleted || !payload.head_commit || !payload.head_commit.message) break;
-
       const productionUpdatedFromSGC = async () => {
         console.log(`[${owner}/${repo}] Production Update from SGC! Rebasing Staging Onto Production`);
         await updateStagingOnProductionPush(octokit, owner, repo);
@@ -82,8 +87,6 @@ webhooks.on("push", async ({ id, name, payload }) => {
       }
 
       // Handle Staging Updates
-      const headCommitMessage = payload.head_commit.message.toLowerCase();
-
       const horizonUpdate = headCommitMessage.includes("merge pull request") && headCommitMessage.includes("/sync/horizon");
       const stagingUpdate = headCommitMessage.includes("merge pull request") && headCommitMessage.includes("/staging");
       const sgcUpdate = headCommitMessage.includes("sync files from sgc-production");
