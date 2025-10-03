@@ -25,7 +25,18 @@ export async function updateParentOnSGCPush(octokit: any, owner: string, repo: s
     });
 
     // Filter for files, excluding specified files
-    const sgcFiles = sgcTree.data.tree.filter((item: any) => item.type === "blob");
+    const sgcFiles = sgcTree.data.tree.filter((item: any) => {
+      if (item.type !== "blob") return false;
+
+      // If parent is staging, exclude JSON files except for settings_schema.json
+      if (parent === "staging") {
+        const isJsonFile = item.path.endsWith('.json');
+        const isSettingsSchema = item.path === 'config/settings_schema.json';
+        return !isJsonFile || isSettingsSchema;
+      }
+
+      return true;
+    });
 
     console.log(`[${owner}/${repo}] Found ${sgcFiles.length} files in sgc-${parent}`);
 
