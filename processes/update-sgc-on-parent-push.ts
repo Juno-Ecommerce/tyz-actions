@@ -77,6 +77,9 @@ export async function updateSGCOnParentPush(octokit: any, owner: string, repo: s
       }
     });
 
+    // Create a set of parent file paths for deletion detection
+    const parentFilePaths = new Set(shopifyFiles.map((f: any) => f.path));
+
     // Prepare tree updates
     const treeUpdates: any[] = [];
     let filesUpdated = 0;
@@ -125,6 +128,40 @@ export async function updateSGCOnParentPush(octokit: any, owner: string, repo: s
       }
     }
 
+    // Handle deletions: files that exist in sgc-${parent} but not in parent (only in Shopify folders)
+    let filesDeleted = 0;
+    for (const [filePath, fileSha] of sgcFiles.entries()) {
+      // Only delete files within Shopify folders
+      const isInShopifyFolder = shopifyFolders.some(folder => 
+        filePath.startsWith(folder + '/') || filePath === folder
+      );
+
+      if (!isInShopifyFolder) {
+        continue; // Skip files outside Shopify folders
+      }
+
+      // Check if this file should be excluded based on JSON filtering (same logic as shopifyFiles filter)
+      const isSettingsSchema = filePath === 'config/settings_schema.json';
+      const isJsonFile = filePath.endsWith('.json');
+      const shouldExcludeJson = !includeJsonFiles && isJsonFile && !isSettingsSchema;
+
+      if (shouldExcludeJson) {
+        continue; // Skip excluded JSON files
+      }
+
+      // If file exists in sgc but not in parent, mark for deletion
+      if (!parentFilePaths.has(filePath)) {
+        treeUpdates.push({
+          path: filePath,
+          mode: "100644", // Standard file mode
+          type: "blob",
+          sha: null // Setting sha to null deletes the file
+        });
+        filesDeleted++;
+        console.log(`[${owner}/${repo}] Deleted ${filePath} (not in ${parent})`);
+      }
+    }
+
     if (treeUpdates.length === 0) {
       console.log(`[${owner}/${repo}] No Shopify files to update in sgc-${parent}`);
       return;
@@ -138,11 +175,24 @@ export async function updateSGCOnParentPush(octokit: any, owner: string, repo: s
       tree: treeUpdates
     });
 
+    // Create commit message
+    const commitParts: string[] = [];
+    if (filesAdded > 0) {
+      commitParts.push(`${filesAdded} added`);
+    }
+    if (filesUpdated > 0) {
+      commitParts.push(`${filesUpdated} updated`);
+    }
+    if (filesDeleted > 0) {
+      commitParts.push(`${filesDeleted} deleted`);
+    }
+    const commitMessage = `Sync Shopify files from ${parent} (${commitParts.join(', ')})`;
+
     // Create a new commit
     const newCommit = await octokit.request("POST /repos/{owner}/{repo}/git/commits", {
       owner,
       repo,
-      message: `Sync Shopify files from ${parent} (${filesAdded} added, ${filesUpdated} updated)`,
+      message: commitMessage,
       tree: newTree.data.sha,
       parents: [sgcSha]
     });
@@ -154,7 +204,18 @@ export async function updateSGCOnParentPush(octokit: any, owner: string, repo: s
       sha: newCommit.data.sha
     });
 
-    console.log(`[${owner}/${repo}] Successfully synced ${filesAdded + filesUpdated} Shopify files from ${parent} to sgc-${parent} (${filesAdded} added, ${filesUpdated} updated)`);
+    const syncParts: string[] = [];
+    if (filesAdded > 0) {
+      syncParts.push(`${filesAdded} added`);
+    }
+    if (filesUpdated > 0) {
+      syncParts.push(`${filesUpdated} updated`);
+    }
+    if (filesDeleted > 0) {
+      syncParts.push(`${filesDeleted} deleted`);
+    }
+    const totalFiles = filesAdded + filesUpdated + filesDeleted;
+    console.log(`[${owner}/${repo}] Successfully synced ${totalFiles} Shopify files from ${parent} to sgc-${parent} (${syncParts.join(', ')})`);
 
   } catch (error: any) {
     console.error(`[${owner}/${repo}] Error syncing Shopify files from ${parent}:`, error.message);
