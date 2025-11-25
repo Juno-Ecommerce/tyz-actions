@@ -162,6 +162,31 @@ export async function updateSGCOnParentPush(octokit: any, owner: string, repo: s
       }
     }
 
+    // Cleanup fallback: Remove any files outside Shopify folder structure
+    let filesCleanedUp = 0;
+    for (const [filePath, fileSha] of sgcFiles.entries()) {
+      // Check if file is in one of the Shopify folders
+      const isInShopifyFolder = shopifyFolders.some(folder => 
+        filePath.startsWith(folder + '/') || filePath === folder
+      );
+
+      // If file is outside Shopify folders, remove it
+      if (!isInShopifyFolder) {
+        // Check if this file is already in treeUpdates (to avoid duplicates)
+        const alreadyInUpdates = treeUpdates.some(update => update.path === filePath);
+        if (!alreadyInUpdates) {
+          treeUpdates.push({
+            path: filePath,
+            mode: "100644", // Standard file mode
+            type: "blob",
+            sha: null // Setting sha to null deletes the file
+          });
+          filesCleanedUp++;
+          console.log(`[${owner}/${repo}] Cleaned up ${filePath} (outside Shopify folder structure)`);
+        }
+      }
+    }
+
     if (treeUpdates.length === 0) {
       console.log(`[${owner}/${repo}] No Shopify files to update in sgc-${parent}`);
       return;
