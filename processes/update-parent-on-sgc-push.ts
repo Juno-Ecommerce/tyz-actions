@@ -61,13 +61,9 @@ export async function updateParentOnSGCPush(octokit: any, owner: string, repo: s
       }
     });
 
-    // Create a set of files in sgc for deletion detection
-    const sgcFilePaths = new Set(sgcFiles.map((f: any) => f.path));
-
     // Prepare tree updates
     const treeUpdates: any[] = [];
     let filesUpdated = 0;
-    let filesDeleted = 0;
 
     for (const sgcFile of sgcFiles) {
       // Check if this file exists in parent
@@ -109,30 +105,6 @@ export async function updateParentOnSGCPush(octokit: any, owner: string, repo: s
       }
     }
 
-    // Handle deletions: files that exist in parent but not in sgc
-    for (const [filePath, fileSha] of parentFiles.entries()) {
-      // Skip if this file is excluded by the filtering logic
-      if (parent === "staging") {
-        const isJsonFile = filePath.endsWith('.json');
-        const isSettingsSchema = filePath === 'config/settings_schema.json';
-        if (isJsonFile && !isSettingsSchema) {
-          continue; // Skip JSON files in staging (except settings_schema.json)
-        }
-      }
-
-      if (!sgcFilePaths.has(filePath)) {
-        // File exists in parent but not in sgc - mark for deletion
-        treeUpdates.push({
-          path: filePath,
-          mode: "100644", // Standard file mode
-          type: "blob",
-          sha: null // Setting sha to null deletes the file
-        });
-        filesDeleted++;
-        console.log(`[${owner}/${repo}] Deleted ${filePath} (not in sgc-${parent})`);
-      }
-    }
-
     if (treeUpdates.length === 0) {
       console.log(`[${owner}/${repo}] No files to update in ${parent}`);
       return;
@@ -146,21 +118,11 @@ export async function updateParentOnSGCPush(octokit: any, owner: string, repo: s
       tree: treeUpdates
     });
 
-    // Create commit message
-    const commitParts: string[] = [];
-    if (filesUpdated > 0) {
-      commitParts.push(`${filesUpdated} file${filesUpdated !== 1 ? 's' : ''} updated`);
-    }
-    if (filesDeleted > 0) {
-      commitParts.push(`${filesDeleted} file${filesDeleted !== 1 ? 's' : ''} deleted`);
-    }
-    const commitMessage = `Sync files from sgc-${parent} (${commitParts.join(', ')})`;
-
     // Create a new commit
     const newCommit = await octokit.request("POST /repos/{owner}/{repo}/git/commits", {
       owner,
       repo,
-      message: commitMessage,
+      message: `Sync files from sgc-${parent} (${filesUpdated} files updated)`,
       tree: newTree.data.sha,
       parents: [parentSha]
     });
@@ -172,14 +134,7 @@ export async function updateParentOnSGCPush(octokit: any, owner: string, repo: s
       sha: newCommit.data.sha
     });
 
-    const syncParts: string[] = [];
-    if (filesUpdated > 0) {
-      syncParts.push(`${filesUpdated} file${filesUpdated !== 1 ? 's' : ''} updated`);
-    }
-    if (filesDeleted > 0) {
-      syncParts.push(`${filesDeleted} file${filesDeleted !== 1 ? 's' : ''} deleted`);
-    }
-    console.log(`[${owner}/${repo}] Successfully synced ${syncParts.join(' and ')} from sgc-${parent} to ${parent}`);
+    console.log(`[${owner}/${repo}] Successfully synced ${filesUpdated} files from sgc-${parent} to ${parent}`);
 
   } catch (error: any) {
     console.error(`[${owner}/${repo}] Error syncing files from sgc-${parent}:`, error.message);
