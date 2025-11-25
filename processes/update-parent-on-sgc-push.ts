@@ -79,9 +79,19 @@ export async function updateParentOnSGCPush(octokit: any, owner: string, repo: s
     // Prepare tree updates
     const treeUpdates: any[] = [];
     let filesUpdated = 0;
+    let filesAdded = 0;
     let filesDeleted = 0;
 
     for (const sgcFile of sgcFiles) {
+      // Only process files in Shopify folders (to match deletion logic)
+      const isInShopifyFolder = shopifyFolders.some(folder => 
+        sgcFile.path.startsWith(folder + '/') || sgcFile.path === folder
+      );
+
+      if (!isInShopifyFolder) {
+        continue; // Skip files outside Shopify folders
+      }
+
       // Check if this file exists in parent
       if (parentFiles.has(sgcFile.path)) {
         // Check if the file content is different
@@ -117,7 +127,32 @@ export async function updateParentOnSGCPush(octokit: any, owner: string, repo: s
         filesUpdated++;
         console.log(`[${owner}/${repo}] Updated ${sgcFile.path}`);
       } else {
-        console.log(`[${owner}/${repo}] File ${sgcFile.path} not found in ${parent}, skipping`);
+        // File doesn't exist in parent - add it
+        // Get the blob content from sgc
+        const blob = await octokit.request("GET /repos/{owner}/{repo}/git/blobs/{file_sha}", {
+          owner,
+          repo,
+          file_sha: sgcFile.sha
+        });
+
+        // Create a new blob in parent with the content from sgc
+        const newBlob = await octokit.request("POST /repos/{owner}/{repo}/git/blobs", {
+          owner,
+          repo,
+          content: blob.data.content,
+          encoding: blob.data.encoding
+        });
+
+        // Add to tree updates
+        treeUpdates.push({
+          path: sgcFile.path,
+          mode: sgcFile.mode,
+          type: "blob",
+          sha: newBlob.data.sha
+        });
+
+        filesAdded++;
+        console.log(`[${owner}/${repo}] Added ${sgcFile.path}`);
       }
     }
 
@@ -169,11 +204,14 @@ export async function updateParentOnSGCPush(octokit: any, owner: string, repo: s
 
     // Create commit message
     const commitParts: string[] = [];
+    if (filesAdded > 0) {
+      commitParts.push(`${filesAdded} added`);
+    }
     if (filesUpdated > 0) {
-      commitParts.push(`${filesUpdated} file${filesUpdated !== 1 ? 's' : ''} updated`);
+      commitParts.push(`${filesUpdated} updated`);
     }
     if (filesDeleted > 0) {
-      commitParts.push(`${filesDeleted} file${filesDeleted !== 1 ? 's' : ''} deleted`);
+      commitParts.push(`${filesDeleted} deleted`);
     }
     const commitMessage = `Sync files from sgc-${parent} (${commitParts.join(', ')})`;
 
@@ -194,13 +232,17 @@ export async function updateParentOnSGCPush(octokit: any, owner: string, repo: s
     });
 
     const syncParts: string[] = [];
+    if (filesAdded > 0) {
+      syncParts.push(`${filesAdded} added`);
+    }
     if (filesUpdated > 0) {
-      syncParts.push(`${filesUpdated} file${filesUpdated !== 1 ? 's' : ''} updated`);
+      syncParts.push(`${filesUpdated} updated`);
     }
     if (filesDeleted > 0) {
-      syncParts.push(`${filesDeleted} file${filesDeleted !== 1 ? 's' : ''} deleted`);
+      syncParts.push(`${filesDeleted} deleted`);
     }
-    console.log(`[${owner}/${repo}] Successfully synced ${syncParts.join(' and ')} from sgc-${parent} to ${parent}`);
+    const totalFiles = filesAdded + filesUpdated + filesDeleted;
+    console.log(`[${owner}/${repo}] Successfully synced ${totalFiles} files from sgc-${parent} to ${parent} (${syncParts.join(', ')})`);
 
   } catch (error: any) {
     console.error(`[${owner}/${repo}] Error syncing files from sgc-${parent}:`, error.message);
