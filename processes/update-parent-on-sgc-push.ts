@@ -53,6 +53,18 @@ export async function updateParentOnSGCPush(octokit: any, owner: string, repo: s
       recursive: "true"
     });
 
+    // Define the specific Shopify folders where deletions are allowed
+    const shopifyFolders = [
+      'assets',
+      'blocks',
+      'config',
+      'layout',
+      'locales',
+      'sections',
+      'snippets',
+      'templates'
+    ];
+
     // Create a map of existing files in parent
     const parentFiles = new Map();
     parentTree.data.tree.forEach((item: any) => {
@@ -61,9 +73,13 @@ export async function updateParentOnSGCPush(octokit: any, owner: string, repo: s
       }
     });
 
+    // Create a set of sgc file paths for deletion detection
+    const sgcFilePaths = new Set(sgcFiles.map((f: any) => f.path));
+
     // Prepare tree updates
     const treeUpdates: any[] = [];
     let filesUpdated = 0;
+    let filesDeleted = 0;
 
     for (const sgcFile of sgcFiles) {
       // Check if this file exists in parent
@@ -105,6 +121,39 @@ export async function updateParentOnSGCPush(octokit: any, owner: string, repo: s
       }
     }
 
+    // Handle deletions: files that exist in parent but not in sgc (only in Shopify folders)
+    for (const [filePath, fileSha] of parentFiles.entries()) {
+      // Only delete files within Shopify folders
+      const isInShopifyFolder = shopifyFolders.some(folder => 
+        filePath.startsWith(folder + '/') || filePath === folder
+      );
+
+      if (!isInShopifyFolder) {
+        continue; // Skip files outside Shopify folders (e.g., build system files)
+      }
+
+      // Skip if this file is excluded by the filtering logic (for staging)
+      if (parent === "staging") {
+        const isJsonFile = filePath.endsWith('.json');
+        const isSettingsSchema = filePath === 'config/settings_schema.json';
+        if (isJsonFile && !isSettingsSchema) {
+          continue; // Skip JSON files in staging (except settings_schema.json)
+        }
+      }
+
+      // If file exists in parent but not in sgc, mark for deletion
+      if (!sgcFilePaths.has(filePath)) {
+        treeUpdates.push({
+          path: filePath,
+          mode: "100644", // Standard file mode
+          type: "blob",
+          sha: null // Setting sha to null deletes the file
+        });
+        filesDeleted++;
+        console.log(`[${owner}/${repo}] Deleted ${filePath} (not in sgc-${parent})`);
+      }
+    }
+
     if (treeUpdates.length === 0) {
       console.log(`[${owner}/${repo}] No files to update in ${parent}`);
       return;
@@ -118,11 +167,21 @@ export async function updateParentOnSGCPush(octokit: any, owner: string, repo: s
       tree: treeUpdates
     });
 
+    // Create commit message
+    const commitParts: string[] = [];
+    if (filesUpdated > 0) {
+      commitParts.push(`${filesUpdated} file${filesUpdated !== 1 ? 's' : ''} updated`);
+    }
+    if (filesDeleted > 0) {
+      commitParts.push(`${filesDeleted} file${filesDeleted !== 1 ? 's' : ''} deleted`);
+    }
+    const commitMessage = `Sync files from sgc-${parent} (${commitParts.join(', ')})`;
+
     // Create a new commit
     const newCommit = await octokit.request("POST /repos/{owner}/{repo}/git/commits", {
       owner,
       repo,
-      message: `Sync files from sgc-${parent} (${filesUpdated} files updated)`,
+      message: commitMessage,
       tree: newTree.data.sha,
       parents: [parentSha]
     });
@@ -134,7 +193,14 @@ export async function updateParentOnSGCPush(octokit: any, owner: string, repo: s
       sha: newCommit.data.sha
     });
 
-    console.log(`[${owner}/${repo}] Successfully synced ${filesUpdated} files from sgc-${parent} to ${parent}`);
+    const syncParts: string[] = [];
+    if (filesUpdated > 0) {
+      syncParts.push(`${filesUpdated} file${filesUpdated !== 1 ? 's' : ''} updated`);
+    }
+    if (filesDeleted > 0) {
+      syncParts.push(`${filesDeleted} file${filesDeleted !== 1 ? 's' : ''} deleted`);
+    }
+    console.log(`[${owner}/${repo}] Successfully synced ${syncParts.join(' and ')} from sgc-${parent} to ${parent}`);
 
   } catch (error: any) {
     console.error(`[${owner}/${repo}] Error syncing files from sgc-${parent}:`, error.message);
