@@ -1,9 +1,54 @@
 import { exec } from "node:child_process";
+import { spawn } from "node:child_process";
 import { promisify } from "node:util";
 import { createWriteStream, mkdirSync } from "node:fs";
 import * as tar from "tar";
 
 const execAsync = promisify(exec);
+
+/**
+ * Executes a command with real-time output streaming
+ */
+function execWithStreaming(command: string, options: { cwd: string; env?: NodeJS.ProcessEnv }): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const [cmd, ...args] = command.split(' ');
+    const child = spawn(cmd, args, {
+      cwd: options.cwd,
+      env: options.env,
+      shell: true,
+      stdio: ['inherit', 'pipe', 'pipe']
+    });
+
+    let stdout = '';
+    let stderr = '';
+
+    child.stdout?.on('data', (data) => {
+      const output = data.toString();
+      stdout += output;
+      // Stream output to console in real-time
+      process.stdout.write(`[SHOPIFY CLI] ${output}`);
+    });
+
+    child.stderr?.on('data', (data) => {
+      const output = data.toString();
+      stderr += output;
+      // Stream errors to console in real-time
+      process.stderr.write(`[SHOPIFY CLI ERROR] ${output}`);
+    });
+
+    child.on('close', (code) => {
+      if (code === 0) {
+        resolve(stdout);
+      } else {
+        reject(new Error(`Command failed with code ${code}\nSTDOUT: ${stdout}\nSTDERR: ${stderr}`));
+      }
+    });
+
+    child.on('error', (error) => {
+      reject(error);
+    });
+  });
+}
 
 /**
  * Extracts the store name from a Shopify admin URL in the repo homepage
@@ -170,10 +215,9 @@ async function createOrUpdatePreviewTheme(
     if (existingThemeId) {
       // Update existing preview theme
       console.log(`[${owner}/${repo}] Updating existing preview theme ${existingThemeId}...`);
-      const { stdout } = await execAsync(
-        `cd ${tempDir} && npx --yes --cache ${npmCacheDir} shopify theme push --theme ${existingThemeId} --store ${storeName} ${onlyFlag}`,
-        { env: shopifyEnv }
-      );
+      const command = `cd ${tempDir} && npx --yes --cache ${npmCacheDir} shopify theme push --theme ${existingThemeId} --store ${storeName} ${onlyFlag}`;
+      console.log(`[${owner}/${repo}] Executing: ${command}`);
+      const stdout = await execWithStreaming(command, { cwd: tempDir, env: shopifyEnv });
 
       themeId = existingThemeId;
       // Extract theme URL from output if available
@@ -184,10 +228,9 @@ async function createOrUpdatePreviewTheme(
     } else {
       // Create new unpublished theme
       console.log(`[${owner}/${repo}] Creating new preview theme...`);
-      const { stdout } = await execAsync(
-        `cd ${tempDir} && npx --yes --cache ${npmCacheDir} shopify theme push --unpublished --store ${storeName} ${onlyFlag}`,
-        { env: shopifyEnv }
-      );
+      const command = `cd ${tempDir} && npx --yes --cache ${npmCacheDir} shopify theme push --unpublished --store ${storeName} ${onlyFlag}`;
+      console.log(`[${owner}/${repo}] Executing: ${command}`);
+      const stdout = await execWithStreaming(command, { cwd: tempDir, env: shopifyEnv });
 
       // Extract theme ID from output
       // Shopify CLI typically outputs: "Theme ID: 123456789" or similar
@@ -207,7 +250,8 @@ async function createOrUpdatePreviewTheme(
     }
 
     // Clean up temporary directory
-    await execAsync(`rm -rf ${tempDir}`).catch(() => {
+    const { rm } = await import("node:fs/promises");
+    await rm(tempDir, { recursive: true, force: true }).catch(() => {
       // Ignore cleanup errors
     });
 
