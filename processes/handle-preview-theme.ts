@@ -15,6 +15,7 @@ function extractStoreNameFromHomepage(homepage: string | null): string | null {
   // Match Shopify admin URLs
   const match = homepage.match(/https?:\/\/admin\.shopify\.com\/store\/([a-zA-Z0-9-]+)/i);
   if (match && match[1]) {
+    console.log(`Extracted store name from homepage: ${match[1]}`);
     return match[1];
   }
 
