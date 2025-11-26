@@ -3,7 +3,6 @@ import { promisify } from "node:util";
 import { createWriteStream, mkdirSync } from "node:fs";
 import * as tar from "tar";
 
-
 const execAsync = promisify(exec);
 
 /**
@@ -153,12 +152,26 @@ async function createOrUpdatePreviewTheme(
     const shopifyFolders = ['assets', 'blocks', 'config', 'layout', 'locales', 'sections', 'snippets', 'templates'];
     const onlyFlag = shopifyFolders.map(folder => `--only ${folder}`).join(' ');
 
+    // Set npm environment variables to use temp directory (for serverless environments)
+    const npmCacheDir = `${tempDir}/.npm-cache`;
+    const npmHomeDir = tempDir;
+    mkdirSync(npmCacheDir, { recursive: true });
+
+    const shopifyEnv = {
+      ...process.env,
+      SHOPIFY_CLI_TOKEN: shopifyToken,
+      NPM_CONFIG_CACHE: npmCacheDir,
+      HOME: npmHomeDir,
+      // Set npm to use the temp directory for all operations
+      npm_config_cache: npmCacheDir,
+    };
+
     if (existingThemeId) {
       // Update existing preview theme
       console.log(`[${owner}/${repo}] Updating existing preview theme ${existingThemeId}...`);
       const { stdout } = await execAsync(
-        `cd ${tempDir} && npx shopify theme push --theme ${existingThemeId} --store ${storeName} ${onlyFlag}`,
-        { env: { ...process.env, SHOPIFY_CLI_TOKEN: shopifyToken } }
+        `cd ${tempDir} && npx --yes --cache ${npmCacheDir} shopify theme push --theme ${existingThemeId} --store ${storeName} ${onlyFlag}`,
+        { env: shopifyEnv }
       );
 
       themeId = existingThemeId;
@@ -171,8 +184,8 @@ async function createOrUpdatePreviewTheme(
       // Create new unpublished theme
       console.log(`[${owner}/${repo}] Creating new preview theme...`);
       const { stdout } = await execAsync(
-        `cd ${tempDir} && npx shopify theme push --unpublished --store ${storeName} ${onlyFlag}`,
-        { env: { ...process.env, SHOPIFY_CLI_TOKEN: shopifyToken } }
+        `cd ${tempDir} && npx --yes --cache ${npmCacheDir} shopify theme push --unpublished --store ${storeName} ${onlyFlag}`,
+        { env: shopifyEnv }
       );
 
       // Extract theme ID from output
