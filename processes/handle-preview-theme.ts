@@ -206,6 +206,7 @@ async function createOrUpdatePreviewTheme(
     const shopifyEnv = {
       ...process.env,
       SHOPIFY_CLI_TOKEN: shopifyToken,
+      SHOPIFY_CLI_PARTNERS_TOKEN: shopifyToken, // Partners API token
       NPM_CONFIG_CACHE: npmCacheDir,
       HOME: npmHomeDir,
       // Set npm to use the temp directory for all operations
