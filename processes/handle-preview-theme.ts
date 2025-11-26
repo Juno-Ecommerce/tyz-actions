@@ -414,9 +414,9 @@ export async function handlePreviewTheme(
     // Get Admin API token from environment
     // This should be a store-specific Admin API access token (starts with shpat_)
     // Generated from a custom app in the store's admin
-    const adminApiToken = process.env.SHOPIFY_CLI_THEME_TOKEN;
+    const adminApiToken = process.env.SHOPIFY_THEME_ACCESS_TOKEN;
     if (!adminApiToken) {
-      throw new Error("SHOPIFY_CLI_THEME_TOKEN environment variable is not set. This should be a store-specific Admin API access token.");
+      throw new Error("SHOPIFY_THEME_ACCESS_TOKEN environment variable is not set. This should be a store-specific Admin API access token.");
     }
 
     // Check if a preview theme already exists for this PR
