@@ -45,7 +45,7 @@ async function checkSgcProductionBranch(octokit: any, owner: string, repo: strin
   }
 }
 
-webhooks.on("push", async ({ id, name, payload }) => {
+webhooks.on("push", async ({ payload }) => {
   const installationId = payload.installation?.id;
   const owner = payload.repository.owner.login;
   const repo = payload.repository.name;
@@ -106,12 +106,7 @@ webhooks.on("push", async ({ id, name, payload }) => {
   }
 });
 
-webhooks.on("pull_request", async ({ id, name, payload }) => {
-  // Only process when PR is merged into production
-  if (payload.action !== "closed" || !payload.pull_request.merged || payload.pull_request.base.ref !== "production") {
-    return;
-  }
-
+webhooks.on("pull_request", async ({ payload }) => {
   const installationId = payload.installation?.id;
   const owner = payload.repository.owner.login;
   const repo = payload.repository.name;
@@ -120,22 +115,47 @@ webhooks.on("pull_request", async ({ id, name, payload }) => {
 
   const octokit = await app.getInstallationOctokit(Number(installationId));
 
-  // Check if repository has sgc-production branch
-  const hasSgcProductionBranch = await checkSgcProductionBranch(octokit, owner, repo);
-  if (!hasSgcProductionBranch) return;
+  switch (payload.action) {
+    case "labeled":
+      const labelName = payload.label?.name?.toLowerCase() || '';
 
-  // Check if PR description/body indicates we should include JSON files
-  const prBody = payload.pull_request.body?.toLowerCase() || '';
-  const prHeadRef = payload.pull_request.head.ref?.toLowerCase() || '';
-  const shouldIncludeJson = prBody.includes('[include-json]') ||
-                            prBody.includes('[sync-json]') ||
-                            prHeadRef.includes('sync/horizon-');
+      // Handle when 'preview' label is added to a PR
+      if (labelName === 'preview') {
+        console.log(`[${owner}/${repo}] Preview label added to PR #${payload.pull_request.number}`);
 
-  if (debug) console.log(`[${owner}/${repo}] Including JSON files: ${shouldIncludeJson} (PR head ref: ${payload.pull_request.head.ref})`);
+        // TODO: Add your preview logic here
+        // Example: await handlePreviewLabel(octokit, owner, repo, payload.pull_request);
 
-  // Update sgc-production when production is updated
-  // Note: staging updates are handled by the push webhook, not here
-  await updateSGCOnParentPush(octokit, owner, repo, shouldIncludeJson, "production");
+        return;
+      }
+
+      break;
+    case "closed":
+      // Only process when PR is merged into production
+      if (!payload.pull_request.merged || payload.pull_request.base.ref !== "production") {
+        return;
+      }
+
+      // Check if repository has sgc-production branch
+      const hasSgcProductionBranch = await checkSgcProductionBranch(octokit, owner, repo);
+      if (!hasSgcProductionBranch) return;
+
+      // Check if PR description/body indicates we should include JSON files
+      const prBody = payload.pull_request.body?.toLowerCase() || '';
+      const prHeadRef = payload.pull_request.head.ref?.toLowerCase() || '';
+      const shouldIncludeJson = prBody.includes('[include-json]') ||
+                                prBody.includes('[sync-json]') ||
+                                prHeadRef.includes('sync/horizon-');
+
+      if (debug) console.log(`[${owner}/${repo}] Including JSON files: ${shouldIncludeJson} (PR head ref: ${payload.pull_request.head.ref})`);
+
+      // Update sgc-production when production is updated
+      // Note: staging updates are handled by the push webhook, not here
+      await updateSGCOnParentPush(octokit, owner, repo, shouldIncludeJson, "production");
+      break;
+    default:
+      return;
+  }
 });
 
 webhooks.onError((err) => {
