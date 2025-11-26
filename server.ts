@@ -7,6 +7,7 @@ import { IncomingMessage, ServerResponse } from "node:http";
 import { updateParentOnSGCPush } from "./processes/update-parent-on-sgc-push.js";
 import { updateStagingOnProductionPush } from "./processes/update-staging-on-production-push.js";
 import { updateSGCOnParentPush } from "./processes/update-sgc-on-parent-push.js";
+import { handlePreviewTheme } from "./processes/handle-preview-theme.js";
 
 const { APP_ID, PRIVATE_KEY, WEBHOOK_SECRET } = process.env;
 invariant(APP_ID, "APP_ID required");
@@ -122,10 +123,20 @@ webhooks.on("pull_request", async ({ payload }) => {
       // Handle when 'preview' label is added to a PR
       if (labelName === 'preview') {
         console.log(`[${owner}/${repo}] Preview label added to PR #${payload.pull_request.number}`);
+        await handlePreviewTheme(octokit, owner, repo, payload.pull_request);
+        return;
+      }
 
-        // TODO: Add your preview logic here
-        // Example: await handlePreviewLabel(octokit, owner, repo, payload.pull_request);
+      break;
+    case "synchronize":
+      // When PR is updated, check if it has the preview label and update the theme
+      const hasPreviewLabel = payload.pull_request.labels?.some(
+        (label: any) => label.name?.toLowerCase() === 'preview'
+      );
 
+      if (hasPreviewLabel) {
+        console.log(`[${owner}/${repo}] PR #${payload.pull_request.number} updated, updating preview theme...`);
+        await handlePreviewTheme(octokit, owner, repo, payload.pull_request);
         return;
       }
 
