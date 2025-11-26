@@ -211,6 +211,9 @@ export async function updateSGCOnParentPush(octokit: any, owner: string, repo: s
     if (filesDeleted > 0) {
       commitParts.push(`${filesDeleted} deleted`);
     }
+    if (filesCleanedUp > 0) {
+      commitParts.push(`${filesCleanedUp} cleaned up`);
+    }
     const commitMessage = `Sync Shopify files from ${parent} (${commitParts.join(', ')})`;
 
     // Create a new commit
@@ -239,8 +242,11 @@ export async function updateSGCOnParentPush(octokit: any, owner: string, repo: s
     if (filesDeleted > 0) {
       syncParts.push(`${filesDeleted} deleted`);
     }
-    const totalFiles = filesAdded + filesUpdated + filesDeleted;
-    console.log(`[${owner}/${repo}] Successfully synced ${totalFiles} Shopify files from ${parent} to sgc-${parent} (${syncParts.join(', ')})`);
+    if (filesCleanedUp > 0) {
+      syncParts.push(`${filesCleanedUp} cleaned up`);
+    }
+    const totalFiles = filesAdded + filesUpdated + filesDeleted + filesCleanedUp;
+    console.log(`[${owner}/${repo}] Successfully synced ${totalFiles} files from ${parent} to sgc-${parent} (${syncParts.join(', ')})`);
 
   } catch (error: any) {
     console.error(`[${owner}/${repo}] Error syncing Shopify files from ${parent}:`, error.message);
