@@ -1,6 +1,7 @@
 import { exec } from "node:child_process";
 import { promisify } from "node:util";
 import { createWriteStream, mkdirSync } from "node:fs";
+import * as tar from "tar";
 
 const execAsync = promisify(exec);
 
@@ -99,12 +100,17 @@ async function downloadRepositoryArchive(
       writeStream.end();
     });
 
-    // Extract the archive
+    // Extract the archive using tar package
     console.log(`[${owner}/${repo}] Extracting archive...`);
-    await execAsync(`cd ${tempDir} && tar -xzf archive.tar.gz --strip-components=1`);
-    
+    await tar.extract({
+      file: archivePath,
+      cwd: tempDir,
+      strip: 1
+    });
+
     // Clean up archive file
-    await execAsync(`rm -f ${archivePath}`).catch(() => {
+    const { unlink } = await import("node:fs/promises");
+    await unlink(archivePath).catch(() => {
       // Ignore cleanup errors
     });
   } catch (error: any) {
