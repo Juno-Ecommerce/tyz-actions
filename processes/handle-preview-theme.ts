@@ -1,5 +1,5 @@
-import { spawn } from "node:child_process";
-import { createWriteStream, mkdirSync } from "node:fs";
+import { createWriteStream, mkdirSync, readdirSync, readFileSync, statSync } from "node:fs";
+import { join } from "node:path";
 import * as tar from "tar";
 
 /**
@@ -118,49 +118,46 @@ async function downloadRepositoryArchive(
 }
 
 /**
- * Executes a command with real-time output streaming
+ * Recursively gets all files in Shopify folders
  */
-function execWithOutput(command: string, args: string[], options: { cwd: string; env?: NodeJS.ProcessEnv }): Promise<string> {
-  return new Promise((resolve, reject) => {
-    const child = spawn(command, args, {
-      cwd: options.cwd,
-      env: options.env,
-      stdio: ['inherit', 'pipe', 'pipe']
-    });
+function getShopifyFiles(dir: string, baseDir: string = dir, shopifyFolders: string[]): Array<{ path: string; content: Buffer }> {
+  const files: Array<{ path: string; content: Buffer }> = [];
 
-    let stdout = '';
-    let stderr = '';
+  try {
+    const entries = readdirSync(dir);
 
-    child.stdout?.on('data', (data) => {
-      const output = data.toString();
-      stdout += output;
-      // Stream output to console in real-time
-      process.stdout.write(output);
-    });
+    for (const entry of entries) {
+      const fullPath = join(dir, entry);
+      const relativePath = fullPath.replace(baseDir + '/', '');
+      const stat = statSync(fullPath);
 
-    child.stderr?.on('data', (data) => {
-      const output = data.toString();
-      stderr += output;
-      // Stream errors to console in real-time
-      process.stderr.write(output);
-    });
+      // Check if this file is in a Shopify folder
+      const isInShopifyFolder = shopifyFolders.some(folder => 
+        relativePath.startsWith(folder + '/') || relativePath === folder
+      );
 
-    child.on('close', (code) => {
-      if (code === 0) {
-        resolve(stdout);
-      } else {
-        reject(new Error(`Command failed with code ${code}\n${stderr}`));
+      if (!isInShopifyFolder) {
+        continue; // Skip files outside Shopify folders
       }
-    });
 
-    child.on('error', (error) => {
-      reject(error);
-    });
-  });
+      if (stat.isDirectory()) {
+        // Recursively get files from subdirectories
+        files.push(...getShopifyFiles(fullPath, baseDir, shopifyFolders));
+      } else if (stat.isFile()) {
+        // Read file content
+        const content = readFileSync(fullPath);
+        files.push({ path: relativePath, content });
+      }
+    }
+  } catch (error) {
+    // Ignore errors reading directories
+  }
+
+  return files;
 }
 
 /**
- * Creates or updates a Shopify preview theme using Shopify CLI with Partners API token
+ * Creates or updates a Shopify preview theme using Admin API
  */
 async function createOrUpdatePreviewTheme(
   octokit: any,
@@ -178,88 +175,112 @@ async function createOrUpdatePreviewTheme(
     console.log(`[${owner}/${repo}] Downloading repository to ${tempDir}...`);
     await downloadRepositoryArchive(octokit, owner, repo, prHeadRef, tempDir);
 
-    // Set up Shopify CLI authentication with Partners API token
-    const partnersToken = process.env.SHOPIFY_CLI_TOKEN;
-    if (!partnersToken) {
+    // Set up Shopify Admin API authentication
+    const shopifyToken = process.env.SHOPIFY_CLI_TOKEN;
+    if (!shopifyToken) {
       throw new Error("SHOPIFY_CLI_TOKEN environment variable is not set");
     }
 
     // Define Shopify folders to push (exclude build files)
     const shopifyFolders = ['assets', 'blocks', 'config', 'layout', 'locales', 'sections', 'snippets', 'templates'];
-    const onlyArgs = shopifyFolders.flatMap(folder => ['--only', folder]);
 
-    // Use node to run the Shopify CLI directly from node_modules
-    const shopifyCliPath = `${process.cwd()}/node_modules/@shopify/cli/bin/shopify.js`;
+    // Get all files from Shopify folders
+    console.log(`[${owner}/${repo}] Reading Shopify theme files...`);
+    const themeFiles = getShopifyFiles(tempDir, tempDir, shopifyFolders);
+    console.log(`[${owner}/${repo}] Found ${themeFiles.length} theme files to upload`);
 
-    // Set up environment for Partners API authentication
-    const shopifyEnv = {
-      ...process.env,
-      SHOPIFY_CLI_PARTNERS_TOKEN: partnersToken,
-      // Also set as SHOPIFY_CLI_TOKEN for compatibility
-      SHOPIFY_CLI_TOKEN: partnersToken,
-      // Set npm cache to temp directory
-      NPM_CONFIG_CACHE: '/tmp/.npm',
-      HOME: '/tmp',
-    };
-
+    const adminApiUrl = `https://${storeName}.myshopify.com/admin/api/2024-01`;
     let themeId: string;
     let themeUrl: string;
 
     if (existingThemeId) {
       // Update existing preview theme
       console.log(`[${owner}/${repo}] Updating existing preview theme ${existingThemeId}...`);
-      const args = [
-        'theme',
-        'push',
-        '--theme', existingThemeId,
-        '--store', storeName,
-        ...onlyArgs
-      ];
-
-      console.log(`[${owner}/${repo}] Running: node ${shopifyCliPath} ${args.join(' ')}`);
-      const stdout = await execWithOutput('node', [shopifyCliPath, ...args], { cwd: tempDir, env: shopifyEnv });
-
       themeId = existingThemeId;
-      // Extract theme URL from output if available
-      const urlMatch = stdout.match(/https?:\/\/[^\s]+/);
-      themeUrl = urlMatch ? urlMatch[0] : `https://${storeName}.myshopify.com/admin/themes/${themeId}`;
 
+      // Upload files to existing theme
+      for (const file of themeFiles) {
+        try {
+          const response = await fetch(`${adminApiUrl}/themes/${themeId}/assets.json`, {
+            method: 'PUT',
+            headers: {
+              'X-Shopify-Access-Token': shopifyToken,
+              'Content-Type': 'application/json',
+            },
+            body: JSON.stringify({
+              asset: {
+                key: file.path,
+                value: file.content.toString('utf8'),
+              }
+            })
+          });
+
+          if (!response.ok) {
+            const errorText = await response.text();
+            console.warn(`[${owner}/${repo}] Failed to update ${file.path}: ${errorText}`);
+          }
+        } catch (error: any) {
+          console.warn(`[${owner}/${repo}] Error updating ${file.path}:`, error.message);
+        }
+      }
+
+      themeUrl = `https://${storeName}.myshopify.com/admin/themes/${themeId}`;
       console.log(`[${owner}/${repo}] Successfully updated preview theme ${themeId}`);
     } else {
       // Create new unpublished theme
       console.log(`[${owner}/${repo}] Creating new preview theme...`);
-      const args = [
-        'theme',
-        'push',
-        '--unpublished',
-        '--store', storeName,
-        ...onlyArgs
-      ];
 
-      console.log(`[${owner}/${repo}] Running: node ${shopifyCliPath} ${args.join(' ')}`);
-      const stdout = await execWithOutput('node', [shopifyCliPath, ...args], { cwd: tempDir, env: shopifyEnv });
+      // Create the theme
+      const createResponse = await fetch(`${adminApiUrl}/themes.json`, {
+        method: 'POST',
+        headers: {
+          'X-Shopify-Access-Token': shopifyToken,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          theme: {
+            name: `Preview - PR #${prNumber}`,
+            role: 'development' // Unpublished theme
+          }
+        })
+      });
 
-      // Extract theme ID from output
-      // Shopify CLI typically outputs: "Theme ID: 123456789" or similar
-      const idMatch = stdout.match(/[Tt]heme\s+[Ii][Dd]:\s*(\d+)/) || 
-                     stdout.match(/[Tt]heme\s+(\d+)/) ||
-                     stdout.match(/id[:\s]+(\d+)/i);
-
-      if (!idMatch || !idMatch[1]) {
-        // Try to extract from any URL in the output
-        const urlMatch = stdout.match(/themes\/(\d+)/);
-        if (urlMatch && urlMatch[1]) {
-          themeId = urlMatch[1];
-        } else {
-          throw new Error(`Could not extract theme ID from Shopify CLI output. Output: ${stdout.substring(0, 500)}`);
-        }
-      } else {
-        themeId = idMatch[1];
+      if (!createResponse.ok) {
+        const errorText = await createResponse.text();
+        throw new Error(`Failed to create theme: ${errorText}`);
       }
 
-      const urlMatch = stdout.match(/https?:\/\/[^\s]+/);
-      themeUrl = urlMatch ? urlMatch[0] : `https://${storeName}.myshopify.com/admin/themes/${themeId}`;
+      const createData = await createResponse.json() as { theme: { id: number } };
+      themeId = createData.theme.id.toString();
 
+      // Upload files to the new theme
+      console.log(`[${owner}/${repo}] Uploading ${themeFiles.length} files to theme...`);
+      for (const file of themeFiles) {
+        try {
+          const response = await fetch(`${adminApiUrl}/themes/${themeId}/assets.json`, {
+            method: 'PUT',
+            headers: {
+              'X-Shopify-Access-Token': shopifyToken,
+              'Content-Type': 'application/json',
+            },
+            body: JSON.stringify({
+              asset: {
+                key: file.path,
+                value: file.content.toString('utf8'),
+              }
+            })
+          });
+
+          if (!response.ok) {
+            const errorText = await response.text();
+            console.warn(`[${owner}/${repo}] Failed to upload ${file.path}: ${errorText}`);
+          }
+        } catch (error: any) {
+          console.warn(`[${owner}/${repo}] Error uploading ${file.path}:`, error.message);
+        }
+      }
+
+      themeUrl = `https://${storeName}.myshopify.com/admin/themes/${themeId}`;
       console.log(`[${owner}/${repo}] Successfully created preview theme ${themeId}`);
 
       // Comment the theme ID on the PR for future updates
