@@ -1,6 +1,12 @@
 import { Octokit } from "@octokit/core";
 import { PullRequest } from "@octokit/webhooks-types";
-import { createWriteStream, mkdirSync, readdirSync, readFileSync, statSync } from "node:fs";
+import {
+  createWriteStream,
+  mkdirSync,
+  readdirSync,
+  readFileSync,
+  statSync,
+} from "node:fs";
 import { join } from "node:path";
 import { createRequire } from "node:module";
 import * as tar from "tar";
@@ -30,22 +36,30 @@ async function extractStoreNameFromHomepage(
   pr: PullRequest
 ): Promise<string | null> {
   const displayMissingStoreNameError = async () => {
-    console.error(`[${owner}/${repo}] Could not extract store name from repository homepage`);
+    console.error(
+      `[${owner}/${repo}] Could not extract store name from repository homepage`
+    );
 
     // Comment on PR about the issue
-    await octokit.request("POST /repos/{owner}/{repo}/issues/{issue_number}/comments", {
-      owner,
-      repo,
-      issue_number: pr.number,
-      body: "❌ Could not create preview theme. Please add a Shopify admin URL to the repository homepage (e.g., `https://admin.shopify.com/store/your-store-name`)."
-    });
+    await octokit.request(
+      "POST /repos/{owner}/{repo}/issues/{issue_number}/comments",
+      {
+        owner,
+        repo,
+        issue_number: pr.number,
+        body: "❌ Could not create preview theme. Please add a Shopify admin URL to the repository homepage (e.g., `https://admin.shopify.com/store/your-store-name`).",
+      }
+    );
   };
 
   // Get repository data
-  const { data: repoData } = await octokit.request("GET /repos/{owner}/{repo}", {
-    owner,
-    repo
-  });
+  const { data: repoData } = await octokit.request(
+    "GET /repos/{owner}/{repo}",
+    {
+      owner,
+      repo,
+    }
+  );
 
   if (!repoData.homepage) {
     await displayMissingStoreNameError();
@@ -53,7 +67,9 @@ async function extractStoreNameFromHomepage(
   }
 
   // Match Shopify admin URLs
-  const match = repoData.homepage.match(/https?:\/\/admin\.shopify\.com\/store\/([a-zA-Z0-9-]+)/i);
+  const match = repoData.homepage.match(
+    /https?:\/\/admin\.shopify\.com\/store\/([a-zA-Z0-9-]+)/i
+  );
   if (match && match[1]) {
     return match[1];
   }
@@ -75,14 +91,19 @@ const getAdminApiToken = async (
   if (process.env.SHOPIFY_THEME_ACCESS_TOKEN) {
     return process.env.SHOPIFY_THEME_ACCESS_TOKEN;
   } else {
-    console.error(`[${owner}/${repo}] SHOPIFY_THEME_ACCESS_TOKEN environment variable is not set`);
+    console.error(
+      `[${owner}/${repo}] SHOPIFY_THEME_ACCESS_TOKEN environment variable is not set`
+    );
 
-    await octokit.request("POST /repos/{owner}/{repo}/issues/{issue_number}/comments", {
-      owner,
-      repo,
-      issue_number: pr.number,
-      body: "❌ SHOPIFY_THEME_ACCESS_TOKEN environment variable is not set. This should be a store-specific Admin API access token."
-    });
+    await octokit.request(
+      "POST /repos/{owner}/{repo}/issues/{issue_number}/comments",
+      {
+        owner,
+        repo,
+        issue_number: pr.number,
+        body: "❌ SHOPIFY_THEME_ACCESS_TOKEN environment variable is not set. This should be a store-specific Admin API access token.",
+      }
+    );
 
     return undefined;
   }
@@ -99,11 +120,14 @@ async function getExistingPreviewThemeId(
   prNumber: number
 ): Promise<string | null> {
   try {
-    const { data: comments } = await octokit.request("GET /repos/{owner}/{repo}/issues/{issue_number}/comments", {
-      owner,
-      repo,
-      issue_number: prNumber
-    });
+    const { data: comments } = await octokit.request(
+      "GET /repos/{owner}/{repo}/issues/{issue_number}/comments",
+      {
+        owner,
+        repo,
+        issue_number: prNumber,
+      }
+    );
 
     for (const comment of comments) {
       const match = comment.body?.match(/Preview Theme ID:\s*(\d+)/i);
@@ -114,7 +138,10 @@ async function getExistingPreviewThemeId(
 
     return null;
   } catch (error: any) {
-    console.error(`[${owner}/${repo}] Error checking for existing preview theme:`, error.message);
+    console.error(
+      `[${owner}/${repo}] Error checking for existing preview theme:`,
+      error.message
+    );
     return null;
   }
 }
@@ -128,6 +155,7 @@ async function commentPreviewThemeId(
   repo: string,
   prNumber: number,
   themeId: string,
+  storeName: string,
   method: "create" | "update"
 ): Promise<void> {
   const createBody = `
@@ -152,14 +180,20 @@ async function commentPreviewThemeId(
   `;
 
   try {
-    await octokit.request("POST /repos/{owner}/{repo}/issues/{issue_number}/comments", {
-      owner,
-      repo,
-      issue_number: prNumber,
-      body: method === "create" ? createBody : updateBody
-    });
+    await octokit.request(
+      "POST /repos/{owner}/{repo}/issues/{issue_number}/comments",
+      {
+        owner,
+        repo,
+        issue_number: prNumber,
+        body: method === "create" ? createBody : updateBody,
+      }
+    );
   } catch (error: any) {
-    console.error(`[${owner}/${repo}] Error commenting theme ID:`, error.message);
+    console.error(
+      `[${owner}/${repo}] Error commenting theme ID:`,
+      error.message
+    );
   }
 }
 
@@ -178,15 +212,20 @@ async function downloadAndExtractRepository(
 
     mkdirSync(tempDir, { recursive: true });
 
-    console.log(`[${owner}/${repo}] Downloading repository archive for ref: ${pr.head.ref}...`);
-    const { data: archive } = await octokit.request("GET /repos/{owner}/{repo}/tarball/{ref}", {
-      owner,
-      repo,
-      ref: pr.head.ref,
-      request: {
-        responseType: "arraybuffer"
+    console.log(
+      `[${owner}/${repo}] Downloading repository archive for ref: ${pr.head.ref}...`
+    );
+    const { data: archive } = await octokit.request(
+      "GET /repos/{owner}/{repo}/tarball/{ref}",
+      {
+        owner,
+        repo,
+        ref: pr.head.ref,
+        request: {
+          responseType: "arraybuffer",
+        },
       }
-    });
+    );
 
     const archivePath = `${tempDir}/archive.tar.gz`;
     console.log(`[${owner}/${repo}] Writing archive to ${archivePath}...`);
@@ -203,17 +242,25 @@ async function downloadAndExtractRepository(
     await tar.extract({
       file: archivePath,
       cwd: tempDir,
-      strip: 1
+      strip: 1,
     });
 
     const { unlink } = await import("node:fs/promises");
     await unlink(archivePath).catch((error: any) => {
-      console.error(`[${owner}/${repo}] Error cleaning up archive file:`, error.message);
+      console.error(
+        `[${owner}/${repo}] Error cleaning up archive file:`,
+        error.message
+      );
     });
 
-    console.log(`[${owner}/${repo}] Successfully downloaded repository archive`);
+    console.log(
+      `[${owner}/${repo}] Successfully downloaded repository archive`
+    );
   } catch (error: any) {
-    console.error(`[${owner}/${repo}] Error downloading repository archive:`, error.message);
+    console.error(
+      `[${owner}/${repo}] Error downloading repository archive:`,
+      error.message
+    );
     throw error;
   }
 }
@@ -238,7 +285,7 @@ function getShopifyFiles(
     "locales",
     "sections",
     "snippets",
-    "templates"
+    "templates",
   ];
 
   const files: Array<{ path: string; content: Buffer }> = [];
@@ -251,8 +298,9 @@ function getShopifyFiles(
       const relativePath = fullPath.replace(baseDir + "/", "");
       const stat = statSync(fullPath);
 
-      const isInShopifyFolder = shopifyFolders.some(folder =>
-        relativePath.startsWith(folder + "/") || relativePath === folder
+      const isInShopifyFolder = shopifyFolders.some(
+        (folder) =>
+          relativePath.startsWith(folder + "/") || relativePath === folder
       );
 
       if (!isInShopifyFolder) continue;
@@ -283,14 +331,18 @@ async function createThemeArchive(
   archivePath: string,
   tempDir: string
 ): Promise<void> {
-  console.log(`[${owner}/${repo}] Creating zip file with ${files.length} files...`);
+  console.log(
+    `[${owner}/${repo}] Creating zip file with ${files.length} files...`
+  );
 
   return new Promise((resolve, reject) => {
     const output = createWriteStream(archivePath);
     const archive = archiver("zip", { zlib: { level: 9 } });
 
     output.on("close", () => {
-      console.log(`[${owner}/${repo}] Zip file created: ${archive.pointer()} bytes`);
+      console.log(
+        `[${owner}/${repo}] Zip file created: ${archive.pointer()} bytes`
+      );
       resolve();
     });
 
@@ -335,7 +387,7 @@ const getStagedTarget = async (
     method: "POST",
     headers: {
       "X-Shopify-Access-Token": adminApiToken,
-      "Content-Type": "application/json"
+      "Content-Type": "application/json",
     },
     body: JSON.stringify({
       query: `
@@ -363,11 +415,11 @@ const getStagedTarget = async (
             mimeType: "application/zip",
             fileSize: archiveBuffer.length.toString(),
             resource: "FILE",
-            httpMethod: "POST"
-          }
-        ]
-      }
-    })
+            httpMethod: "POST",
+          },
+        ],
+      },
+    }),
   });
 
   if (!stagedUploadResponse.ok) {
@@ -377,7 +429,8 @@ const getStagedTarget = async (
     );
   }
 
-  const stagedUploadResult = (await stagedUploadResponse.json()) as StagedUploadResponse;
+  const stagedUploadResult =
+    (await stagedUploadResponse.json()) as StagedUploadResponse;
 
   console.log(
     `[${owner}/${repo}] Staged upload result:`,
@@ -399,7 +452,9 @@ const getStagedTarget = async (
 
   if (stagedCreate.userErrors.length > 0) {
     throw new Error(
-      `Failed to create staged upload: ${JSON.stringify(stagedCreate.userErrors)}`
+      `Failed to create staged upload: ${JSON.stringify(
+        stagedCreate.userErrors
+      )}`
     );
   }
 
@@ -424,7 +479,7 @@ const getStagedTarget = async (
 
   const uploadResponse = await fetch(stagedTarget.url, {
     method: "POST",
-    body: formData
+    body: formData,
   });
 
   if (!uploadResponse.ok) {
@@ -434,7 +489,9 @@ const getStagedTarget = async (
     );
   }
 
-  console.log(`[${owner}/${repo}] Successfully uploaded file to staged upload URL`);
+  console.log(
+    `[${owner}/${repo}] Successfully uploaded file to staged upload URL`
+  );
 
   // This URL is what we pass as originalSource to themeCreate
   return stagedTarget.resourceUrl;
@@ -496,7 +553,8 @@ async function createOrUpdatePreviewTheme(
     tempDir,
     adminApiToken
   );
-  if (!resourceUrl) throw new Error("Failed to upload file and get resource URL");
+  if (!resourceUrl)
+    throw new Error("Failed to upload file and get resource URL");
 
   let themeId: string;
   let themeUrl: string;
@@ -513,7 +571,7 @@ async function createOrUpdatePreviewTheme(
       method: "POST",
       headers: {
         "X-Shopify-Access-Token": adminApiToken,
-        "Content-Type": "application/json"
+        "Content-Type": "application/json",
       },
       body: JSON.stringify({
         query: `
@@ -533,10 +591,10 @@ async function createOrUpdatePreviewTheme(
         variables: {
           id: `gid://shopify/OnlineStoreTheme/${existingThemeId}`,
           input: {
-            name: `Tryzens/Preview - PR #${pr.number} (${formatDateDDMMYY()})`
-          }
-        }
-      })
+            name: `Tryzens/Preview - PR #${pr.number} (${formatDateDDMMYY()})`,
+          },
+        },
+      }),
     });
 
     const updateResult = (await createResponse.json()) as {
@@ -551,7 +609,10 @@ async function createOrUpdatePreviewTheme(
       };
     };
 
-    console.log(`[${owner}/${repo}] Update result:`, JSON.stringify(updateResult, null, 2));
+    console.log(
+      `[${owner}/${repo}] Update result:`,
+      JSON.stringify(updateResult, null, 2)
+    );
 
     if (updateResult.data.themeUpdate.userErrors.length > 0) {
       const errors = updateResult.data.themeUpdate.userErrors;
@@ -565,9 +626,11 @@ async function createOrUpdatePreviewTheme(
     themeId = themeGid.split("/").pop() || "";
 
     themeUrl = `https://${storeName}.myshopify.com/admin/themes/${themeId}`;
-    console.log(`[${owner}/${repo}] Successfully updated preview theme ${themeId}`);
+    console.log(
+      `[${owner}/${repo}] Successfully updated preview theme ${themeId}`
+    );
 
-    await commentPreviewThemeId(octokit, owner, repo, pr.number, themeId);
+    await commentPreviewThemeId(octokit, owner, repo, pr.number, themeId, storeName, "update");
   } else {
     console.log(`[${owner}/${repo}] Creating new preview theme...`);
 
@@ -575,7 +638,7 @@ async function createOrUpdatePreviewTheme(
       method: "POST",
       headers: {
         "X-Shopify-Access-Token": adminApiToken,
-        "Content-Type": "application/json"
+        "Content-Type": "application/json",
       },
       body: JSON.stringify({
         query: `
@@ -594,9 +657,9 @@ async function createOrUpdatePreviewTheme(
         `,
         variables: {
           name: `Tryzens/Preview - PR #${pr.number} (${formatDateDDMMYY()})`,
-          source: resourceUrl
-        }
-      })
+          source: resourceUrl,
+        },
+      }),
     });
 
     const createResult = (await createResponse.json()) as {
@@ -611,7 +674,10 @@ async function createOrUpdatePreviewTheme(
       };
     };
 
-    console.log(`[${owner}/${repo}] Create result:`, JSON.stringify(createResult, null, 2));
+    console.log(
+      `[${owner}/${repo}] Create result:`,
+      JSON.stringify(createResult, null, 2)
+    );
 
     if (createResult.data.themeCreate.userErrors.length > 0) {
       const errors = createResult.data.themeCreate.userErrors;
@@ -625,16 +691,23 @@ async function createOrUpdatePreviewTheme(
     themeId = themeGid.split("/").pop() || "";
 
     themeUrl = `https://${storeName}.myshopify.com/admin/themes/${themeId}`;
-    console.log(`[${owner}/${repo}] Successfully created preview theme ${themeId}`);
+    console.log(
+      `[${owner}/${repo}] Successfully created preview theme ${themeId}`
+    );
 
-    await commentPreviewThemeId(octokit, owner, repo, pr.number, themeId);
+    await commentPreviewThemeId(octokit, owner, repo, pr.number, themeId, storeName, "create");
   }
 
   // Clean up temporary directory
   const { rm } = await import("node:fs/promises");
-  await rm(tempDir, { recursive: true, force: true }).catch((error: unknown) => {
-    console.log(`[${owner}/${repo}] Error cleaning up temporary directory:`, error);
-  });
+  await rm(tempDir, { recursive: true, force: true }).catch(
+    (error: unknown) => {
+      console.log(
+        `[${owner}/${repo}] Error cleaning up temporary directory:`,
+        error
+      );
+    }
+  );
 
   console.log(`[${owner}/${repo}] Preview theme ready: ${themeUrl}`);
 }
@@ -649,7 +722,12 @@ export async function handlePreviewTheme(
   pr: PullRequest
 ): Promise<void> {
   try {
-    const storeName = await extractStoreNameFromHomepage(octokit, owner, repo, pr);
+    const storeName = await extractStoreNameFromHomepage(
+      octokit,
+      owner,
+      repo,
+      pr
+    );
     if (!storeName) return;
 
     const adminApiToken = await getAdminApiToken(octokit, pr, owner, repo);
@@ -677,11 +755,14 @@ export async function handlePreviewTheme(
       error.message
     );
 
-    await octokit.request("POST /repos/{owner}/{repo}/issues/{issue_number}/comments", {
-      owner,
-      repo,
-      issue_number: pr.number,
-      body: `❌ Error creating preview theme: ${error.message}`
-    });
+    await octokit.request(
+      "POST /repos/{owner}/{repo}/issues/{issue_number}/comments",
+      {
+        owner,
+        repo,
+        issue_number: pr.number,
+        body: `❌ Error creating preview theme: ${error.message}`,
+      }
+    );
   }
 }
