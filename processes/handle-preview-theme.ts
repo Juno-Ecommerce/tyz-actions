@@ -347,6 +347,49 @@ const getStagedTarget = async (
     return null;
   }
 
+  // Step 2: Upload the file directly to the staged upload URL with authentication parameters
+  console.log(`[${owner}/${repo}] Uploading file to staged upload URL...`);
+
+  // Build multipart/form-data manually
+  const boundary = `----WebKitFormBoundary${Date.now()}`;
+  const formParts: Buffer[] = [];
+
+  // Add authentication parameters from staged upload
+  for (const param of stagedTarget.parameters || []) {
+    formParts.push(Buffer.from(
+      `--${boundary}\r\n` +
+      `Content-Disposition: form-data; name="${param.name}"\r\n\r\n` +
+      `${param.value}\r\n`
+    ));
+  }
+
+  // Add file
+  formParts.push(Buffer.from(
+    `--${boundary}\r\n` +
+    `Content-Disposition: form-data; name="file"; filename="theme.zip"\r\n` +
+    `Content-Type: application/zip\r\n\r\n`
+  ));
+  formParts.push(archiveBuffer);
+  formParts.push(Buffer.from(`\r\n--${boundary}--\r\n`));
+
+  const formData = Buffer.concat(formParts);
+
+  const uploadResponse = await fetch(stagedTarget.url, {
+    method: 'POST',
+    headers: {
+      'Content-Type': `multipart/form-data; boundary=${boundary}`,
+    },
+    body: formData
+  });
+
+  if (!uploadResponse.ok) {
+    const errorText = await uploadResponse.text();
+    throw new Error(`Failed to upload file to staged upload URL: ${uploadResponse.statusText} - ${errorText}`);
+  }
+
+  console.log(`[${owner}/${repo}] Successfully uploaded file to staged upload URL`);
+
+  // Return the resourceUrl to be used as originalSource in fileCreate
   return stagedTarget.resourceUrl;
 }
 
@@ -414,7 +457,7 @@ const uploadToStagedTarget = async (
 }
 
 /**
- * Uploads the theme files to the store
+ * Uploads the theme files to the store and returns the file ID
  */
 const handleFileUpload = async (
   graphqlUrl: string,
@@ -423,18 +466,19 @@ const handleFileUpload = async (
   themeFiles: Array<{ path: string; content: Buffer }>,
   tempDir: string,
   adminApiToken: string
-): Promise<void> => {
+): Promise<string | null> => {
   const archivePath = `${tempDir}/theme.zip`;
   await createThemeArchive(owner, repo, themeFiles, archivePath, tempDir);
   const archiveBuffer = readFileSync(archivePath);
 
-  const stagedTarget = await getStagedTarget(graphqlUrl, adminApiToken, owner, repo, archiveBuffer);
-  if (!stagedTarget) return;
+  const resourceUrl = await getStagedTarget(graphqlUrl, adminApiToken, owner, repo, archiveBuffer);
+  if (!resourceUrl) {
+    throw new Error('Failed to get staged upload resource URL');
+  }
 
-  const fileId = await uploadToStagedTarget(graphqlUrl, adminApiToken, owner, repo, stagedTarget);
-  if (!fileId) return;
-
-  return fileId;
+  // File has been uploaded to staged upload URL in getStagedTarget
+  // Return the resourceUrl to be used as originalSource in theme creation
+  return resourceUrl;
 }
 
 /**
@@ -459,8 +503,11 @@ async function createOrUpdatePreviewTheme(
     // Step 2: Filter to get only Shopify root structure files (assets, blocks, config, layout, locales, sections, snippets, templates)
     const themeFiles = getShopifyFiles(owner, repo, tempDir);
 
-    // Step 3: Upload the Film to the relevant store
-    const uploadedFile = await handleFileUpload(graphqlUrl, owner, repo, themeFiles, tempDir, adminApiToken);
+    // Step 3: Upload the file to staged upload and get resourceUrl
+    const resourceUrl = await handleFileUpload(graphqlUrl, owner, repo, themeFiles, tempDir, adminApiToken);
+    if (!resourceUrl) {
+      throw new Error('Failed to upload file and get resource URL');
+    }
 
     let themeId: string;
     let themeUrl: string;
@@ -531,44 +578,8 @@ async function createOrUpdatePreviewTheme(
       // Create new unpublished theme using GraphQL with staged upload
       console.log(`[${owner}/${repo}] Creating new preview theme...`);
 
-      // Build multipart/form-data manually
-      const boundary = `----WebKitFormBoundary${Date.now()}`;
-      const formParts: Buffer[] = [];
-
-      // Add parameters
-      for (const param of stagedTarget.parameters || []) {
-        formParts.push(Buffer.from(
-          `--${boundary}\r\n` +
-          `Content-Disposition: form-data; name="${param.name}"\r\n\r\n` +
-          `${param.value}\r\n`
-        ));
-      }
-
-      // Add file
-      formParts.push(Buffer.from(
-        `--${boundary}\r\n` +
-        `Content-Disposition: form-data; name="file"; filename="theme.zip"\r\n` +
-        `Content-Type: application/zip\r\n\r\n`
-      ));
-      formParts.push(archiveBuffer);
-      formParts.push(Buffer.from(`\r\n--${boundary}--\r\n`));
-
-      const formData = Buffer.concat(formParts);
-
-      const uploadResponse = await fetch(stagedTarget.url, {
-        method: 'POST',
-        headers: {
-          'Content-Type': `multipart/form-data; boundary=${boundary}`,
-        },
-        body: formData
-      });
-
-      if (!uploadResponse.ok) {
-        throw new Error(`Failed to upload archive: ${uploadResponse.statusText}`);
-      }
-
-      // Step 6: Create the theme using the staged upload resource URL
-      console.log(`[${owner}/${repo}] Creating theme from staged upload...`);
+      // Step 4: Create the theme using the resourceUrl as originalSource
+      console.log(`[${owner}/${repo}] Creating theme from staged upload resource URL...`);
       const createThemeMutation = `
         mutation themeCreate($theme: ThemeCreateInput!) {
           themeCreate(theme: $theme) {
@@ -596,7 +607,7 @@ async function createOrUpdatePreviewTheme(
             theme: {
               name: `Preview - PR #${pr.number}`,
               role: 'DEVELOPMENT',
-              src: stagedTarget.resourceUrl
+              originalSource: resourceUrl
             }
           }
         })
@@ -629,7 +640,7 @@ async function createOrUpdatePreviewTheme(
 
       themeUrl = `https://${storeName}.myshopify.com/admin/themes/${themeId}`;
       console.log(`[${owner}/${repo}] Successfully created preview theme ${themeId}`);
-
+      
       // Comment the theme ID on the PR for future updates
       await commentPreviewThemeId(octokit, owner, repo, pr.number, themeId);
     }
@@ -679,12 +690,12 @@ export async function handlePreviewTheme(
   } catch (error: any) {
     console.error(`[${owner}/${repo}] Error handling preview generation, please contact a senior developer.`, error.message);
 
-    await octokit.request("POST /repos/{owner}/{repo}/issues/{issue_number}/comments", {
-      owner,
-      repo,
-      issue_number: pr.number,
-      body: `❌ Error creating preview theme: ${error.message}`
-    });
+      await octokit.request("POST /repos/{owner}/{repo}/issues/{issue_number}/comments", {
+        owner,
+        repo,
+        issue_number: pr.number,
+        body: `❌ Error creating preview theme: ${error.message}`
+      });
   }
 }
 
