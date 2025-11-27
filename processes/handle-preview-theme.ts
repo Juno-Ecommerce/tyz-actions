@@ -283,10 +283,9 @@ async function createOrUpdatePreviewTheme(
 ): Promise<void> {
   try {
     const graphqlUrl = `https://${storeName}.myshopify.com/admin/api/2025-10/graphql.json`;
-
-    // Create a temporary directory
     const tempDir = `/tmp/preview-${owner}-${repo}-${pr.number}-${Date.now()}`;
 
+    // Create a temporary directory
     await createTemporaryDirectory(octokit, owner, repo, pr, tempDir);
 
     // Get all files from Shopify folders
