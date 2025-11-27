@@ -474,16 +474,21 @@ async function createOrUpdatePreviewTheme(
     );
     themeId = existingThemeId;
 
-    console.log(
-      `[${owner}/${repo}] Uploading ${themeFiles.length} files to theme...`
-    );
-    for (const file of themeFiles) {
-      try {
-        const themeFilesUpdateMutation = `
-          mutation themeFilesUpdate($themeId: ID!, $files: [ThemeFileInput!]!) {
-            themeFilesUpdate(themeId: $themeId, files: $files) {
+    console.log(`[${owner}/${repo}] Creating new preview theme...`);
+
+    const createResponse = await fetch(graphqlUrl, {
+      method: "POST",
+      headers: {
+        "X-Shopify-Access-Token": adminApiToken,
+        "Content-Type": "application/json"
+      },
+      body: JSON.stringify({
+        query: `
+           mutation themeUpdate($id: ID!, $input: OnlineStoreThemeInput!) {
+            themeUpdate(id: $id, input: $input) {
               theme {
                 id
+                name
               }
               userErrors {
                 field
@@ -491,57 +496,45 @@ async function createOrUpdatePreviewTheme(
               }
             }
           }
-        `;
-
-        const response = await fetch(graphqlUrl, {
-          method: "POST",
-          headers: {
-            "X-Shopify-Access-Token": adminApiToken,
-            "Content-Type": "application/json"
-          },
-          body: JSON.stringify({
-            query: themeFilesUpdateMutation,
-            variables: {
-              themeId: `gid://shopify/Theme/${themeId}`,
-              files: [
-                {
-                  key: file.path,
-                  value: file.content.toString("utf8")
-                }
-              ]
-            }
-          })
-        });
-
-        const result = (await response.json()) as {
-          errors?: Array<{ message: string }>;
-          data?: {
-            themeFilesUpdate?: {
-              userErrors?: Array<{ field: string[]; message: string }>;
-            };
-          };
-        };
-        if (result.errors || (result.data?.themeFilesUpdate?.userErrors?.length ?? 0) > 0) {
-          const errors = result.errors || result.data?.themeFilesUpdate?.userErrors;
-          console.warn(
-            `[${owner}/${repo}] Failed to update ${file.path}:`,
-            JSON.stringify(errors)
-          );
-        } else {
-          console.log(`[${owner}/${repo}] Updated ${file.path}`);
+        `,
+        variables: {
+          id: `gid://shopify/OnlineStoreTheme/${existingThemeId}`,
+          input: {
+            name: `Tryzens/Preview - PR #${pr.number} ${Date.now()}`
+          }
         }
-      } catch (error: any) {
-        console.warn(
-          `[${owner}/${repo}] Error updating ${file.path}:`,
-          error.message
-        );
-      }
+      })
+    });
+
+    const createResult = (await createResponse.json()) as {
+      data: {
+        themeCreate: {
+          theme: {
+            id: string;
+            name: string;
+          };
+          userErrors: Array<{ field: string[]; message: string }>;
+        };
+      };
+    };
+
+    console.log(`[${owner}/${repo}] Create result:`, JSON.stringify(createResult, null, 2));
+
+    if (createResult.data.themeCreate.userErrors.length > 0) {
+      const errors = createResult.data.themeCreate.userErrors;
+      throw new Error(`Failed to create theme: ${JSON.stringify(errors)}`);
     }
 
+    const themeGid = createResult.data.themeCreate.theme.id;
+    if (!themeGid) {
+      throw new Error("Failed to get theme ID from create response");
+    }
+    themeId = themeGid.split("/").pop() || "";
+
     themeUrl = `https://${storeName}.myshopify.com/admin/themes/${themeId}`;
-    console.log(
-      `[${owner}/${repo}] Successfully updated preview theme ${themeId}`
-    );
+    console.log(`[${owner}/${repo}] Successfully created preview theme ${themeId}`);
+
+    await commentPreviewThemeId(octokit, owner, repo, pr.number, themeId);
   } else {
     console.log(`[${owner}/${repo}] Creating new preview theme...`);
 
@@ -567,7 +560,7 @@ async function createOrUpdatePreviewTheme(
           }
         `,
         variables: {
-          name: `Tryzens / Preview - PR #${pr.number}`,
+          name: `Tryzens/Preview - PR #${pr.number} ${Date.now()}`,
           source: resourceUrl
         }
       })
@@ -584,7 +577,7 @@ async function createOrUpdatePreviewTheme(
         };
       };
     };
-    
+
     console.log(`[${owner}/${repo}] Create result:`, JSON.stringify(createResult, null, 2));
 
     if (createResult.data.themeCreate.userErrors.length > 0) {
