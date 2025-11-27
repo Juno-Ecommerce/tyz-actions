@@ -485,7 +485,7 @@ async function createOrUpdatePreviewTheme(
     );
     themeId = existingThemeId;
 
-    console.log(`[${owner}/${repo}] Creating new preview theme...`);
+    console.log(`[${owner}/${repo}] Updating new preview theme...`);
 
     const createResponse = await fetch(graphqlUrl, {
       method: "POST",
@@ -529,21 +529,21 @@ async function createOrUpdatePreviewTheme(
       };
     };
 
-    console.log(`[${owner}/${repo}] Create result:`, JSON.stringify(updateResult, null, 2));
+    console.log(`[${owner}/${repo}] Update result:`, JSON.stringify(updateResult, null, 2));
 
     if (updateResult.data.themeUpdate.userErrors.length > 0) {
       const errors = updateResult.data.themeUpdate.userErrors;
-      throw new Error(`Failed to create theme: ${JSON.stringify(errors)}`);
+      throw new Error(`Failed to update theme: ${JSON.stringify(errors)}`);
     }
 
     const themeGid = updateResult.data.themeUpdate.theme.id;
     if (!themeGid) {
-      throw new Error("Failed to get theme ID from create response");
+      throw new Error("Failed to get theme ID from update response");
     }
     themeId = themeGid.split("/").pop() || "";
 
     themeUrl = `https://${storeName}.myshopify.com/admin/themes/${themeId}`;
-    console.log(`[${owner}/${repo}] Successfully created preview theme ${themeId}`);
+    console.log(`[${owner}/${repo}] Successfully updated preview theme ${themeId}`);
 
     await commentPreviewThemeId(octokit, owner, repo, pr.number, themeId);
   } else {
