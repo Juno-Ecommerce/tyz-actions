@@ -110,8 +110,8 @@ const getAdminApiToken = async (
 };
 
 /**
- * Checks PR comments for an existing preview theme ID
- * Looks for a comment with pattern: "Preview Theme ID: <id>"
+ * Checks PR description for an existing preview theme ID
+ * Looks for pattern: "[preview-theme-id:<id>]" in the PR body
  */
 async function getExistingPreviewThemeId(
   octokit: Octokit,
@@ -120,19 +120,29 @@ async function getExistingPreviewThemeId(
   prNumber: number
 ): Promise<string | null> {
   try {
-    const { data: comments } = await octokit.request(
-      "GET /repos/{owner}/{repo}/issues/{issue_number}/comments",
+    const { data: pr } = await octokit.request(
+      "GET /repos/{owner}/{repo}/pulls/{pull_number}",
       {
-        owner,
-        repo,
-        issue_number: prNumber,
+      owner,
+      repo,
+        pull_number: prNumber,
       }
     );
 
-    for (const comment of comments) {
-      const match = comment.body?.match(/Preview Theme ID:\s*(\d+)/i);
+    if (pr.body) {
+      // Match the new format: [preview-theme-id:123456]
+      const match = pr.body.match(/\[preview-theme-id:(\d+)\]/i);
       if (match && match[1]) {
         return match[1];
+      }
+      // Also support old formats for backwards compatibility
+      const oldMatch1 = pr.body.match(/Preview Theme ID:\s*\[(\d+)\]/i);
+      if (oldMatch1 && oldMatch1[1]) {
+        return oldMatch1[1];
+      }
+      const oldMatch2 = pr.body.match(/Preview Theme ID:\s*(\d+)/i);
+      if (oldMatch2 && oldMatch2[1]) {
+        return oldMatch2[1];
       }
     }
 
@@ -143,6 +153,64 @@ async function getExistingPreviewThemeId(
       error.message
     );
     return null;
+  }
+}
+
+/**
+ * Saves the preview theme ID to the PR description with warnings
+ */
+async function saveThemeIdToDescription(
+  octokit: Octokit,
+  owner: string,
+  repo: string,
+  prNumber: number,
+  themeId: string
+): Promise<void> {
+  try {
+    // Get current PR to preserve existing description
+    const { data: pr } = await octokit.request(
+      "GET /repos/{owner}/{repo}/pulls/{pull_number}",
+      {
+        owner,
+        repo,
+        pull_number: prNumber,
+      }
+    );
+
+    let updatedBody = pr.body || "";
+
+    // Remove existing Preview Theme ID section if present
+    // Match the warning block pattern (multiline)
+    updatedBody = updatedBody.replace(
+      /\n?\n?⚠️\s*WARNING:.*?\n.*?\[preview-theme-id:\d+\].*?\n.*?⚠️\s*Only remove.*?⚠️/gs,
+      ""
+    );
+    // Also remove any old formats
+    updatedBody = updatedBody.replace(/\[preview-theme-id:\d+\]/gi, "").trim();
+    updatedBody = updatedBody.replace(/Preview Theme ID:\s*\[?\d+\]?/gi, "").trim();
+
+    // Add the Preview Theme ID with warnings and square brackets
+    const themeIdSection = `\n\n⚠️ WARNING: DO NOT REMOVE ⚠️
+[preview-theme-id:${themeId}]
+⚠️ Only remove this if you want to create a new preview theme entirely ⚠️`;
+
+    // Append the theme ID section
+    updatedBody += themeIdSection;
+
+    // Update the PR description
+    await octokit.request("PATCH /repos/{owner}/{repo}/pulls/{pull_number}", {
+      owner,
+      repo,
+      pull_number: prNumber,
+      body: updatedBody,
+    });
+
+    console.log(`[${owner}/${repo}] Saved theme ID ${themeId} to PR description`);
+  } catch (error: any) {
+    console.error(
+      `[${owner}/${repo}] Error saving theme ID to PR description:`,
+      error.message
+    );
   }
 }
 
@@ -556,10 +624,10 @@ async function createOrUpdatePreviewTheme(
   if (!resourceUrl)
     throw new Error("Failed to upload file and get resource URL");
 
-  let themeId: string;
-  let themeUrl: string;
+    let themeId: string;
+    let themeUrl: string;
 
-  if (existingThemeId) {
+    if (existingThemeId) {
     console.log(
       `[${owner}/${repo}] Updating existing preview theme ${existingThemeId}...`
     );
@@ -630,9 +698,10 @@ async function createOrUpdatePreviewTheme(
       `[${owner}/${repo}] Successfully updated preview theme ${themeId}`
     );
 
+    await saveThemeIdToDescription(octokit, owner, repo, pr.number, themeId);
     await commentPreviewThemeId(octokit, owner, repo, pr.number, themeId, storeName, "update");
-  } else {
-    console.log(`[${owner}/${repo}] Creating new preview theme...`);
+    } else {
+      console.log(`[${owner}/${repo}] Creating new preview theme...`);
 
     const createResponse = await fetch(graphqlUrl, {
       method: "POST",
@@ -695,10 +764,11 @@ async function createOrUpdatePreviewTheme(
       `[${owner}/${repo}] Successfully created preview theme ${themeId}`
     );
 
+    await saveThemeIdToDescription(octokit, owner, repo, pr.number, themeId);
     await commentPreviewThemeId(octokit, owner, repo, pr.number, themeId, storeName, "create");
-  }
+    }
 
-  // Clean up temporary directory
+    // Clean up temporary directory
   const { rm } = await import("node:fs/promises");
   await rm(tempDir, { recursive: true, force: true }).catch(
     (error: unknown) => {
@@ -709,7 +779,7 @@ async function createOrUpdatePreviewTheme(
     }
   );
 
-  console.log(`[${owner}/${repo}] Preview theme ready: ${themeUrl}`);
+    console.log(`[${owner}/${repo}] Preview theme ready: ${themeUrl}`);
 }
 
 /**
@@ -735,8 +805,8 @@ export async function handlePreviewTheme(
 
     const existingThemeId = await getExistingPreviewThemeId(
       octokit,
-      owner,
-      repo,
+        owner,
+        repo,
       pr.number
     );
 
@@ -762,7 +832,7 @@ export async function handlePreviewTheme(
         repo,
         issue_number: pr.number,
         body: `❌ Error creating preview theme: ${error.message}`,
-      }
+    }
     );
   }
 }
