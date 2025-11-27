@@ -7,6 +7,7 @@
   },
   "dependencies": {
     "@octokit/app": "^15",
+    "@octokit/core": "^7.0.6",
     "@octokit/request": "^8",
     "@octokit/webhooks": "^12",
     "@shopify/cli": "^3.87.4",
@@ -14,6 +15,8 @@
     "tiny-invariant": "^1.3.3"
   },
   "devDependencies": {
+    "@octokit/types": "^16.0.0",
+    "@octokit/webhooks-types": "^7.6.1",
     "@types/node": "^20",
     "@types/tar": "^6.1.13",
     "typescript": "^5.9.2"
