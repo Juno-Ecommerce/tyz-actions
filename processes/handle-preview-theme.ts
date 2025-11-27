@@ -488,7 +488,7 @@ async function createOrUpdatePreviewTheme(
           query: createThemeMutation,
           variables: {
             theme: {
-              name: `Preview - PR #${prNumber}`,
+              name: `Preview - PR #${pr.number}`,
               role: 'DEVELOPMENT',
               src: stagedTarget.resourceUrl
             }
@@ -525,7 +525,7 @@ async function createOrUpdatePreviewTheme(
       console.log(`[${owner}/${repo}] Successfully created preview theme ${themeId}`);
 
       // Comment the theme ID on the PR for future updates
-      await commentPreviewThemeId(octokit, owner, repo, prNumber, themeId);
+      await commentPreviewThemeId(octokit, owner, repo, pr.number, themeId);
     }
 
     // Clean up temporary directory
