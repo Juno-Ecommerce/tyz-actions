@@ -1,8 +1,12 @@
 import { Octokit } from "@octokit/core";
 import { PullRequest } from "@octokit/webhooks-types";
-import { createWriteStream, mkdirSync, readdirSync, readFileSync, statSync, writeFileSync } from "node:fs";
+import { createWriteStream, mkdirSync, readdirSync, readFileSync, statSync } from "node:fs";
 import { join } from "node:path";
+import { createRequire } from "node:module";
 import * as tar from "tar";
+
+const require = createRequire(import.meta.url);
+const archiver = require("archiver");
 
 /**
  * Extracts the store name from a Shopify admin URL in the repo homepage
@@ -128,7 +132,7 @@ async function commentPreviewThemeId(octokit: any, owner: string, repo: string, 
 /**
  * Downloads and extracts a repository archive to a temporary directory
  */
-async function createTemporaryDirectory(
+async function downloadAndExtractRepository(
   octokit: Octokit,
   owner: string,
   repo: string,
@@ -186,7 +190,9 @@ async function createTemporaryDirectory(
 }
 
 /**
- * Recursively gets all files in Shopify folders
+ * Recursively gets all files in Shopify root structure folders only
+ * Filters to include only: assets, blocks, config, layout, locales, sections, snippets, templates
+ * Excludes all build files and other non-Shopify files
  */
 function getShopifyFiles(
   owner: string,
@@ -196,7 +202,7 @@ function getShopifyFiles(
 ): Array<{ path: string; content: Buffer }> {
   console.log(`[${owner}/${repo}] Reading Shopify theme files...`);
 
-  // Define Shopify folders to push (exclude build files)
+  // Define Shopify root structure folders (exclude build files and other directories)
   const shopifyFolders = ['assets', 'blocks', 'config', 'layout', 'locales', 'sections', 'snippets', 'templates'];
 
   const files: Array<{ path: string; content: Buffer }> = [];
@@ -235,38 +241,39 @@ function getShopifyFiles(
 }
 
 /**
- * Creates a tar.gz archive from theme files
+ * Creates a zip archive from theme files
  */
 async function createThemeArchive(
   owner: string,
   repo: string,
-  files: Array<{ path: string; content: Buffer }>, 
-  archivePath: string, 
+  files: Array<{ path: string; content: Buffer }>,
+  archivePath: string,
   tempDir: string
 ): Promise<void> {
   console.log(`[${owner}/${repo}] Creating zip file with ${files.length} files...`);
 
-  // Create a temporary directory structure matching the theme files
-  const themeTempDir = `${tempDir}/theme-files`;
-  mkdirSync(themeTempDir, { recursive: true });
+  return new Promise((resolve, reject) => {
+    const output = createWriteStream(archivePath);
+    const archive = archiver('zip', { zlib: { level: 9 } });
 
-  // Write all files to the temp directory
-  for (const file of files) {
-    const filePath = join(themeTempDir, file.path);
-    const fileDir = join(filePath, '..');
-    mkdirSync(fileDir, { recursive: true });
-    writeFileSync(filePath, file.content);
-  }
+    output.on('close', () => {
+      console.log(`[${owner}/${repo}] Zip file created: ${archive.pointer()} bytes`);
+      resolve();
+    });
 
-  // Create tar.gz archive
-  await tar.create(
-    {
-      gzip: true,
-      file: archivePath,
-      cwd: themeTempDir,
-    },
-    files.map(f => f.path)
-  );
+    archive.on('error', (error: Error) => {
+      reject(error);
+    });
+
+    archive.pipe(output);
+
+    // Add all files to the archive
+    for (const file of files) {
+      archive.append(file.content, { name: file.path });
+    }
+
+    archive.finalize();
+  });
 }
 
 /**
@@ -285,18 +292,18 @@ async function createOrUpdatePreviewTheme(
     const graphqlUrl = `https://${storeName}.myshopify.com/admin/api/2025-10/graphql.json`;
     const tempDir = `/tmp/preview-${owner}-${repo}-${pr.number}-${Date.now()}`;
 
-    // Create a temporary directory
-    await createTemporaryDirectory(octokit, owner, repo, pr, tempDir);
+    // Step 1: Download and extract the repository
+    await downloadAndExtractRepository(octokit, owner, repo, pr, tempDir);
 
-    // Get all files from Shopify folders
+    // Step 2: Filter to get only Shopify root structure files (assets, blocks, config, layout, locales, sections, snippets, templates)
     const themeFiles = getShopifyFiles(owner, repo, tempDir);
 
-    // Step 1: Create a tar.gz archive of all theme files
-    const archivePath = `${tempDir}/theme.tar.gz`;
+    // Step 3: Create a zip archive containing only the Shopify root structure
+    const archivePath = `${tempDir}/theme.zip`;
     await createThemeArchive(owner, repo, themeFiles, archivePath, tempDir);
     const archiveBuffer = readFileSync(archivePath);
 
-    // Step 2: Create a staged upload target
+    // Step 4: Create a staged upload target
     console.log(`[${owner}/${repo}] Creating staged upload...`);
 
     const stagedUploadResponse = await fetch(graphqlUrl, {
@@ -326,10 +333,10 @@ async function createOrUpdatePreviewTheme(
         `,
         variables: {
           input: [{
-            resource: 'FILE',
             filename: `theme-${Date.now()}.zip`,
             mimeType: 'application/zip',
-            fileSize: archiveBuffer.length.toString()
+            fileSize: archiveBuffer.length.toString(),
+            resource: 'FILE'
           }]
         }
       })
@@ -359,8 +366,8 @@ async function createOrUpdatePreviewTheme(
       throw new Error('Failed to get staged upload target');
     }
 
-    // Step 3: Upload the tar.gz archive to the staged upload URL
-    console.log(`[${owner}/${repo}] Uploading tar.gz archive to staged upload...`);
+    // Step 5: Upload the zip archive to the staged upload URL
+    console.log(`[${owner}/${repo}] Uploading zip archive to staged upload...`);
 
     let themeId: string;
     let themeUrl: string;
@@ -448,8 +455,8 @@ async function createOrUpdatePreviewTheme(
       // Add file
       formParts.push(Buffer.from(
         `--${boundary}\r\n` +
-        `Content-Disposition: form-data; name="file"; filename="theme.tar.gz"\r\n` +
-        `Content-Type: application/gzip\r\n\r\n`
+        `Content-Disposition: form-data; name="file"; filename="theme.zip"\r\n` +
+        `Content-Type: application/zip\r\n\r\n`
       ));
       formParts.push(archiveBuffer);
       formParts.push(Buffer.from(`\r\n--${boundary}--\r\n`));
@@ -468,7 +475,7 @@ async function createOrUpdatePreviewTheme(
         throw new Error(`Failed to upload archive: ${uploadResponse.statusText}`);
       }
 
-      // Step 4: Create the theme using the staged upload resource URL
+      // Step 6: Create the theme using the staged upload resource URL
       console.log(`[${owner}/${repo}] Creating theme from staged upload...`);
       const createThemeMutation = `
         mutation themeCreate($theme: ThemeCreateInput!) {
