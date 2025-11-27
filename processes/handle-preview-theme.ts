@@ -190,9 +190,12 @@ async function saveThemeIdToDescription(
     updatedBody = updatedBody.replace(/Preview Theme ID:\s*\[?\d+\]?/gi, "").trim();
 
     // Add the Preview Theme ID with warnings and square brackets
-    const themeIdSection = `\n\n⚠️ WARNING: DO NOT REMOVE ⚠️
-[preview-theme-id:${themeId}]
-⚠️ Only remove this if you want to create a new preview theme entirely ⚠️`;
+    const themeIdSection = `
+      \n\n\n\n\n\n
+      ⚠️ WARNING: DO NOT REMOVE ⚠️
+      [preview-theme-id:${themeId}]
+      ⚠️ Only remove this if you want to create a new preview theme entirely ⚠️
+    `;
 
     // Append the theme ID section
     updatedBody += themeIdSection;
