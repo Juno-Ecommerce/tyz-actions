@@ -127,14 +127,36 @@ async function commentPreviewThemeId(
   owner: string,
   repo: string,
   prNumber: number,
-  themeId: string
+  themeId: string,
+  method: "create" | "update"
 ): Promise<void> {
+  const createBody = `
+    Preview theme successfully created!
+
+    Theme URL: https://${storeName}.myshopify.com?preview_theme_id=${themeId}
+    Customiser URL: https://${storeName}.myshopify.com/admin/themes/${themeId}/editor
+    Code URL: https://${storeName}.myshopify.com/admin/themes/${themeId}
+    \n
+    \n
+    This theme will be updated automatically when you push changes to this PR.
+    \n
+    The theme ID has been saved into the PR description. Please only remove this id from your PR description if you want to create a new preview theme.
+  `;
+
+  const updateBody = `
+    Preview theme successfully updated!
+
+    Theme URL: https://${storeName}.myshopify.com?preview_theme_id=${themeId}
+    Customiser URL: https://${storeName}.myshopify.com/admin/themes/${themeId}/editor
+    Code URL: https://${storeName}.myshopify.com/admin/themes/${themeId}
+  `;
+
   try {
     await octokit.request("POST /repos/{owner}/{repo}/issues/{issue_number}/comments", {
       owner,
       repo,
       issue_number: prNumber,
-      body: `🎨 Preview Theme ID: ${themeId}\n\nThis theme will be updated automatically when you push changes to this PR.`
+      body: method === "create" ? createBody : updateBody
     });
   } catch (error: any) {
     console.error(`[${owner}/${repo}] Error commenting theme ID:`, error.message);
