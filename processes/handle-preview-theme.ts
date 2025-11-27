@@ -448,176 +448,171 @@ async function createOrUpdatePreviewTheme(
   existingThemeId: string | null,
   adminApiToken: string
 ): Promise<void> {
-  try {
-    const graphqlUrl = `https://${storeName}.myshopify.com/admin/api/2025-10/graphql.json`;
-    const tempDir = `/tmp/preview-${owner}-${repo}-${pr.number}-${Date.now()}`;
+  const graphqlUrl = `https://${storeName}.myshopify.com/admin/api/2025-10/graphql.json`;
+  const tempDir = `/tmp/preview-${owner}-${repo}-${pr.number}-${Date.now()}`;
 
-    await downloadAndExtractRepository(octokit, owner, repo, pr, tempDir);
+  await downloadAndExtractRepository(octokit, owner, repo, pr, tempDir);
 
-    const themeFiles = getShopifyFiles(owner, repo, tempDir);
+  const themeFiles = getShopifyFiles(owner, repo, tempDir);
 
-    const resourceUrl = await handleFileUpload(
-      graphqlUrl,
-      owner,
-      repo,
-      themeFiles,
-      tempDir,
-      adminApiToken
+  const resourceUrl = await handleFileUpload(
+    graphqlUrl,
+    owner,
+    repo,
+    themeFiles,
+    tempDir,
+    adminApiToken
+  );
+  if (!resourceUrl) throw new Error("Failed to upload file and get resource URL");
+
+  let themeId: string;
+  let themeUrl: string;
+
+  if (existingThemeId) {
+    console.log(
+      `[${owner}/${repo}] Updating existing preview theme ${existingThemeId}...`
     );
-    if (!resourceUrl) throw new Error("Failed to upload file and get resource URL");
+    themeId = existingThemeId;
 
-    let themeId: string;
-    let themeUrl: string;
-
-    if (existingThemeId) {
-      console.log(
-        `[${owner}/${repo}] Updating existing preview theme ${existingThemeId}...`
-      );
-      themeId = existingThemeId;
-
-      console.log(
-        `[${owner}/${repo}] Uploading ${themeFiles.length} files to theme...`
-      );
-      for (const file of themeFiles) {
-        try {
-          const themeFilesUpdateMutation = `
-            mutation themeFilesUpdate($themeId: ID!, $files: [ThemeFileInput!]!) {
-              themeFilesUpdate(themeId: $themeId, files: $files) {
-                theme {
-                  id
-                }
-                userErrors {
-                  field
-                  message
-                }
+    console.log(
+      `[${owner}/${repo}] Uploading ${themeFiles.length} files to theme...`
+    );
+    for (const file of themeFiles) {
+      try {
+        const themeFilesUpdateMutation = `
+          mutation themeFilesUpdate($themeId: ID!, $files: [ThemeFileInput!]!) {
+            themeFilesUpdate(themeId: $themeId, files: $files) {
+              theme {
+                id
               }
-            }
-          `;
-
-          const response = await fetch(graphqlUrl, {
-            method: "POST",
-            headers: {
-              "X-Shopify-Access-Token": adminApiToken,
-              "Content-Type": "application/json"
-            },
-            body: JSON.stringify({
-              query: themeFilesUpdateMutation,
-              variables: {
-                themeId: `gid://shopify/Theme/${themeId}`,
-                files: [
-                  {
-                    key: file.path,
-                    value: file.content.toString("utf8")
-                  }
-                ]
+              userErrors {
+                field
+                message
               }
-            })
-          });
-
-          const result = (await response.json()) as {
-            errors?: Array<{ message: string }>;
-            data?: {
-              themeFilesUpdate?: {
-                userErrors?: Array<{ field: string[]; message: string }>;
-              };
-            };
-          };
-          if (result.errors || (result.data?.themeFilesUpdate?.userErrors?.length ?? 0) > 0) {
-            const errors = result.errors || result.data?.themeFilesUpdate?.userErrors;
-            console.warn(
-              `[${owner}/${repo}] Failed to update ${file.path}:`,
-              JSON.stringify(errors)
-            );
-          } else {
-            console.log(`[${owner}/${repo}] Updated ${file.path}`);
-          }
-        } catch (error: any) {
-          console.warn(
-            `[${owner}/${repo}] Error updating ${file.path}:`,
-            error.message
-          );
-        }
-      }
-
-      themeUrl = `https://${storeName}.myshopify.com/admin/themes/${themeId}`;
-      console.log(
-        `[${owner}/${repo}] Successfully updated preview theme ${themeId}`
-      );
-    } else {
-      console.log(`[${owner}/${repo}] Creating new preview theme...`);
-
-      const createResponse = await fetch(graphqlUrl, {
-        method: "POST",
-        headers: {
-          "X-Shopify-Access-Token": adminApiToken,
-          "Content-Type": "application/json"
-        },
-        body: JSON.stringify({
-          query: `
-            mutation themeCreate($theme: ThemeCreateInput!) {
-              themeCreate(theme: $theme) {
-                theme {
-                  id
-                  name
-                }
-                userErrors {
-                  field
-                  message
-                }
-              }
-            }
-          `,
-          variables: {
-            theme: {
-              name: `Tryzens / Preview - PR #${pr.number}`,
-              source: resourceUrl
             }
           }
-        })
-      });
+        `;
 
-      const createResult = (await createResponse.json()) as {
-        data: {
-          themeCreate: {
-            theme: {
-              id: string;
-              name: string;
+        const response = await fetch(graphqlUrl, {
+          method: "POST",
+          headers: {
+            "X-Shopify-Access-Token": adminApiToken,
+            "Content-Type": "application/json"
+          },
+          body: JSON.stringify({
+            query: themeFilesUpdateMutation,
+            variables: {
+              themeId: `gid://shopify/Theme/${themeId}`,
+              files: [
+                {
+                  key: file.path,
+                  value: file.content.toString("utf8")
+                }
+              ]
+            }
+          })
+        });
+
+        const result = (await response.json()) as {
+          errors?: Array<{ message: string }>;
+          data?: {
+            themeFilesUpdate?: {
+              userErrors?: Array<{ field: string[]; message: string }>;
             };
-            userErrors: Array<{ field: string[]; message: string }>;
           };
         };
-      };
-
-      if (createResult.data.themeCreate.userErrors.length > 0) {
-        const errors = createResult.data.themeCreate.userErrors;
-        throw new Error(`Failed to create theme: ${JSON.stringify(errors)}`);
+        if (result.errors || (result.data?.themeFilesUpdate?.userErrors?.length ?? 0) > 0) {
+          const errors = result.errors || result.data?.themeFilesUpdate?.userErrors;
+          console.warn(
+            `[${owner}/${repo}] Failed to update ${file.path}:`,
+            JSON.stringify(errors)
+          );
+        } else {
+          console.log(`[${owner}/${repo}] Updated ${file.path}`);
+        }
+      } catch (error: any) {
+        console.warn(
+          `[${owner}/${repo}] Error updating ${file.path}:`,
+          error.message
+        );
       }
-
-      const themeGid = createResult.data.themeCreate.theme.id;
-      if (!themeGid) {
-        throw new Error("Failed to get theme ID from create response");
-      }
-      themeId = themeGid.split("/").pop() || "";
-
-      themeUrl = `https://${storeName}.myshopify.com/admin/themes/${themeId}`;
-      console.log(`[${owner}/${repo}] Successfully created preview theme ${themeId}`);
-
-      await commentPreviewThemeId(octokit, owner, repo, pr.number, themeId);
     }
 
-    const { rm } = await import("node:fs/promises");
-    await rm(tempDir, { recursive: true, force: true }).catch(() => {
-      // ignore cleanup errors
+    themeUrl = `https://${storeName}.myshopify.com/admin/themes/${themeId}`;
+    console.log(
+      `[${owner}/${repo}] Successfully updated preview theme ${themeId}`
+    );
+  } else {
+    console.log(`[${owner}/${repo}] Creating new preview theme...`);
+
+    const createResponse = await fetch(graphqlUrl, {
+      method: "POST",
+      headers: {
+        "X-Shopify-Access-Token": adminApiToken,
+        "Content-Type": "application/json"
+      },
+      body: JSON.stringify({
+        query: `
+          mutation themeCreate($theme: ThemeCreateInput!) {
+            themeCreate(theme: $theme) {
+              theme {
+                id
+                name
+              }
+              userErrors {
+                field
+                message
+              }
+            }
+          }
+        `,
+        variables: {
+          theme: {
+            name: `Tryzens / Preview - PR #${pr.number}`,
+            source: resourceUrl
+          }
+        }
+      })
     });
 
-    console.log(`[${owner}/${repo}] Preview theme ready: ${themeUrl}`);
-  } catch (error: any) {
-    console.error(
-      `[${owner}/${repo}] Error creating/updating preview theme:`,
-      error.message
-    );
-    throw error;
+    const createResult = (await createResponse.json()) as {
+      data: {
+        themeCreate: {
+          theme: {
+            id: string;
+            name: string;
+          };
+          userErrors: Array<{ field: string[]; message: string }>;
+        };
+      };
+    };
+    
+    console.log(`[${owner}/${repo}] Create result:`, JSON.stringify(createResult, null, 2));
+
+    if (createResult.data.themeCreate.userErrors.length > 0) {
+      const errors = createResult.data.themeCreate.userErrors;
+      throw new Error(`Failed to create theme: ${JSON.stringify(errors)}`);
+    }
+
+    const themeGid = createResult.data.themeCreate.theme.id;
+    if (!themeGid) {
+      throw new Error("Failed to get theme ID from create response");
+    }
+    themeId = themeGid.split("/").pop() || "";
+
+    themeUrl = `https://${storeName}.myshopify.com/admin/themes/${themeId}`;
+    console.log(`[${owner}/${repo}] Successfully created preview theme ${themeId}`);
+
+    await commentPreviewThemeId(octokit, owner, repo, pr.number, themeId);
   }
+
+  // Clean up temporary directory
+  const { rm } = await import("node:fs/promises");
+  await rm(tempDir, { recursive: true, force: true }).catch((error: unknown) => {
+    console.log(`[${owner}/${repo}] Error cleaning up temporary directory:`, error);
+  });
+
+  console.log(`[${owner}/${repo}] Preview theme ready: ${themeUrl}`);
 }
 
 /**
