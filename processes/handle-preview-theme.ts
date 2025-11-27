@@ -276,18 +276,13 @@ async function createThemeArchive(
   });
 }
 
-const handleFileUpload = async (
+const getStagedTarget = async (
   graphqlUrl: string,
+  adminApiToken: string,
   owner: string,
   repo: string,
-  themeFiles: Array<{ path: string; content: Buffer }>,
-  tempDir: string,
-  adminApiToken: string
-): Promise<void> => {
-  const archivePath = `${tempDir}/theme.zip`;
-  await createThemeArchive(owner, repo, themeFiles, archivePath, tempDir);
-  const archiveBuffer = readFileSync(archivePath);
-
+  archiveBuffer: Buffer
+): Promise<string | null> => {
   console.log(`[${owner}/${repo}] Creating staged upload...`);
 
   const stagedUploadResponse = await fetch(graphqlUrl, {
@@ -327,30 +322,117 @@ const handleFileUpload = async (
   });
 
   const stagedUploadResult = await stagedUploadResponse.json() as {
-    errors?: Array<{ message: string }>;
-    data?: {
-      stagedUploadsCreate?: {
-        stagedTargets?: Array<{
+    data: {
+      stagedUploadsCreate: {
+        stagedTargets: {
           resourceUrl: string;
           url: string;
           parameters?: Array<{ name: string; value: string }>;
-        }>;
-        userErrors?: Array<{ field: string[]; message: string }>;
+        }[];
+        userErrors: { field: string[]; message: string }[];
       };
     };
   };
 
   console.log(`[${owner}/${repo}] Staged upload result:`, JSON.stringify(stagedUploadResult, null, 2));
 
-  if (stagedUploadResult.errors || (stagedUploadResult.data?.stagedUploadsCreate?.userErrors?.length ?? 0 > 0)) {
-    const errors = stagedUploadResult.errors || stagedUploadResult.data?.stagedUploadsCreate?.userErrors;
+  if (stagedUploadResult.data?.stagedUploadsCreate?.userErrors?.length ?? 0 > 0) {
+    const errors = stagedUploadResult.data?.stagedUploadsCreate?.userErrors;
     throw new Error(`Failed to create staged upload: ${JSON.stringify(errors)}`);
   }
 
   const stagedTarget = stagedUploadResult.data?.stagedUploadsCreate?.stagedTargets?.[0];
   if (!stagedTarget) {
-    throw new Error('Failed to get staged upload target');
+    console.error(`[${owner}/${repo}] Failed to get staged upload target`);
+    return null;
   }
+
+  return stagedTarget.resourceUrl;
+}
+
+const uploadToStagedTarget = async (
+  graphqlUrl: string,
+  adminApiToken: string,
+  owner: string,
+  repo: string,
+  stagedTarget: string
+): Promise<string | null> => {
+  console.log(`[${owner}/${repo}] Uploading zipped theme files to staged target...`);
+
+  const fileCreateResponse = await fetch(graphqlUrl, {
+    method: 'POST',
+    headers: {
+      'X-Shopify-Access-Token': adminApiToken,
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify({
+      query: `
+        mutation fileCreate($files: [FileCreateInput!]!) {
+          fileCreate(files: $files) {
+            files {
+              id
+              fileStatus
+              createdAt
+            }
+            userErrors {
+              field
+              message
+            }
+          }
+        }
+      `,
+      variables: {
+        input: [{
+          contentType: "FILE",
+          originalSource: stagedTarget,
+        }]
+      }
+    })
+  });
+
+  const fileCreateResult = await fileCreateResponse.json() as {
+    fileCreate: {
+      files: {
+        id: string;
+        fileStatus: string;
+        createdAt: string;
+      }[];
+    };
+    userErrors: { field: string[]; message: string }[];
+  };
+
+  console.log(`[${owner}/${repo}] File create result:`, JSON.stringify(fileCreateResult, null, 2));
+
+  if (fileCreateResult.userErrors.length ?? 0 > 0) {
+    const errors = fileCreateResult.userErrors;
+    throw new Error(`Failed to create file: ${JSON.stringify(errors)}`);
+  }
+
+  return fileCreateResult.fileCreate.files[0].id;
+}
+
+/**
+ * Uploads the theme files to the store
+ */
+const handleFileUpload = async (
+  graphqlUrl: string,
+  owner: string,
+  repo: string,
+  themeFiles: Array<{ path: string; content: Buffer }>,
+  tempDir: string,
+  adminApiToken: string
+): Promise<void> => {
+  const archivePath = `${tempDir}/theme.zip`;
+  await createThemeArchive(owner, repo, themeFiles, archivePath, tempDir);
+  const archiveBuffer = readFileSync(archivePath);
+
+  const stagedTarget = await getStagedTarget(graphqlUrl, adminApiToken, owner, repo, archiveBuffer);
+  if (!stagedTarget) return;
+
+  const fileId = await uploadToStagedTarget(graphqlUrl, adminApiToken, owner, repo, stagedTarget);
+  if (!fileId) return;
+
+  return fileId;
 }
 
 /**
