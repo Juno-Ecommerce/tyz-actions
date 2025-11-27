@@ -128,7 +128,7 @@ async function commentPreviewThemeId(octokit: any, owner: string, repo: string, 
 /**
  * Downloads and extracts a repository archive to a temporary directory
  */
-async function downloadRepositoryArchive(
+async function createTemporaryDirectory(
   octokit: Octokit,
   owner: string,
   repo: string,
@@ -287,7 +287,7 @@ async function createOrUpdatePreviewTheme(
     // Create a temporary directory
     const tempDir = `/tmp/preview-${owner}-${repo}-${pr.number}-${Date.now()}`;
 
-    await downloadRepositoryArchive(octokit, owner, repo, pr, tempDir);
+    await createTemporaryDirectory(octokit, owner, repo, pr, tempDir);
 
     // Get all files from Shopify folders
     const themeFiles = getShopifyFiles(owner, repo, tempDir);
