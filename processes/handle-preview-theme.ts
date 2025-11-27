@@ -129,22 +129,24 @@ async function commentPreviewThemeId(octokit: any, owner: string, repo: string, 
  * Downloads and extracts a repository archive to a temporary directory
  */
 async function downloadRepositoryArchive(
-  octokit: any,
+  octokit: Octokit,
   owner: string,
   repo: string,
-  ref: string,
+  pr: PullRequest,
   tempDir: string
 ): Promise<void> {
   try {
+    console.log(`[${owner}/${repo}] Downloading repository to ${tempDir}...`);
+
     // Create temp directory
     mkdirSync(tempDir, { recursive: true });
 
     // Download the archive using GitHub API
-    console.log(`[${owner}/${repo}] Downloading repository archive for ref: ${ref}...`);
+    console.log(`[${owner}/${repo}] Downloading repository archive for ref: ${pr.head.ref}...`);
     const { data: archive } = await octokit.request("GET /repos/{owner}/{repo}/tarball/{ref}", {
       owner,
       repo,
-      ref,
+      ref: pr.head.ref,
       request: {
         responseType: "arraybuffer"
       }
@@ -152,6 +154,7 @@ async function downloadRepositoryArchive(
 
     // Write archive to file
     const archivePath = `${tempDir}/archive.tar.gz`;
+    console.log(`[${owner}/${repo}] Writing archive to ${archivePath}...`);
     const buffer = Buffer.from(archive as ArrayBuffer);
     const writeStream = createWriteStream(archivePath);
     await new Promise<void>((resolve, reject) => {
@@ -172,8 +175,10 @@ async function downloadRepositoryArchive(
     // Clean up archive file
     const { unlink } = await import("node:fs/promises");
     await unlink(archivePath).catch(() => {
-      // Ignore cleanup errors
+      console.error(`[${owner}/${repo}] Error cleaning up archive file:`, error.message);
     });
+
+    console.log(`[${owner}/${repo}] Successfully downloaded repository archive`);
   } catch (error: any) {
     console.error(`[${owner}/${repo}] Error downloading repository archive:`, error.message);
     throw error;
@@ -248,21 +253,19 @@ async function createThemeArchive(files: Array<{ path: string; content: Buffer }
  * Creates or updates a Shopify preview theme using Admin API
  */
 async function createOrUpdatePreviewTheme(
-  octokit: any,
+  octokit: Octokit,
   owner: string,
   repo: string,
-  prNumber: number,
-  prHeadRef: string,
+  pr: PullRequest,
   storeName: string,
   existingThemeId: string | null,
   adminApiToken: string
 ): Promise<void> {
   try {
     // Create a temporary directory
-    const tempDir = `/tmp/preview-${owner}-${repo}-${prNumber}-${Date.now()}`;
+    const tempDir = `/tmp/preview-${owner}-${repo}-${pr.number}-${Date.now()}`;
 
-    console.log(`[${owner}/${repo}] Downloading repository to ${tempDir}...`);
-    await downloadRepositoryArchive(octokit, owner, repo, prHeadRef, tempDir);
+    await downloadRepositoryArchive(octokit, owner, repo, pr, tempDir);
 
     // Define Shopify folders to push (exclude build files)
     const shopifyFolders = ['assets', 'blocks', 'config', 'layout', 'locales', 'sections', 'snippets', 'templates'];
@@ -427,7 +430,7 @@ async function createOrUpdatePreviewTheme(
           `${param.value}\r\n`
         ));
       }
-      
+
       // Add file
       formParts.push(Buffer.from(
         `--${boundary}\r\n` +
@@ -555,8 +558,7 @@ export async function handlePreviewTheme(
       octokit,
       owner,
       repo,
-      pr.number,
-      pr.head.ref,
+      pr,
       storeName,
       existingThemeId,
       adminApiToken
