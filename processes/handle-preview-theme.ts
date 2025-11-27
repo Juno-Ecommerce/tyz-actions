@@ -237,7 +237,15 @@ function getShopifyFiles(
 /**
  * Creates a tar.gz archive from theme files
  */
-async function createThemeArchive(files: Array<{ path: string; content: Buffer }>, archivePath: string, tempDir: string): Promise<void> {
+async function createThemeArchive(
+  owner: string,
+  repo: string,
+  files: Array<{ path: string; content: Buffer }>, 
+  archivePath: string, 
+  tempDir: string
+): Promise<void> {
+  console.log(`[${owner}/${repo}] Creating zip file with ${files.length} files...`);
+
   // Create a temporary directory structure matching the theme files
   const themeTempDir = `${tempDir}/theme-files`;
   mkdirSync(themeTempDir, { recursive: true });
@@ -274,6 +282,8 @@ async function createOrUpdatePreviewTheme(
   adminApiToken: string
 ): Promise<void> {
   try {
+    const graphqlUrl = `https://${storeName}.myshopify.com/admin/api/2025-10/graphql.json`;
+
     // Create a temporary directory
     const tempDir = `/tmp/preview-${owner}-${repo}-${pr.number}-${Date.now()}`;
 
@@ -282,7 +292,77 @@ async function createOrUpdatePreviewTheme(
     // Get all files from Shopify folders
     const themeFiles = getShopifyFiles(owner, repo, tempDir);
 
-    const graphqlUrl = `https://${storeName}.myshopify.com/admin/api/2025-10/graphql.json`;
+    // Step 1: Create a tar.gz archive of all theme files
+    const archivePath = `${tempDir}/theme.tar.gz`;
+    await createThemeArchive(owner, repo, themeFiles, archivePath, tempDir);
+    const archiveBuffer = readFileSync(archivePath);
+
+    // Step 2: Create a staged upload target
+    console.log(`[${owner}/${repo}] Creating staged upload...`);
+
+    const stagedUploadResponse = await fetch(graphqlUrl, {
+      method: 'POST',
+      headers: {
+        'X-Shopify-Access-Token': adminApiToken,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        query: `
+          mutation stagedUploadsCreate($input: [StagedUploadInput!]!) {
+            stagedUploadsCreate(input: $input) {
+              stagedTargets {
+                resourceUrl
+                url
+                parameters {
+                  name
+                  value
+                }
+              }
+              userErrors {
+                field
+                message
+              }
+            }
+          }
+        `,
+        variables: {
+          input: [{
+            resource: 'FILE',
+            filename: `theme-${Date.now()}.zip`,
+            mimeType: 'application/zip',
+            fileSize: archiveBuffer.length.toString()
+          }]
+        }
+      })
+    });
+
+    const stagedUploadResult = await stagedUploadResponse.json() as {
+      errors?: Array<{ message: string }>;
+      data?: {
+        stagedUploadsCreate?: {
+          stagedTargets?: Array<{
+            resourceUrl: string;
+            url: string;
+            parameters?: Array<{ name: string; value: string }>;
+          }>;
+          userErrors?: Array<{ field: string[]; message: string }>;
+        };
+      };
+    };
+
+    if (stagedUploadResult.errors || (stagedUploadResult.data?.stagedUploadsCreate?.userErrors?.length ?? 0 > 0)) {
+      const errors = stagedUploadResult.errors || stagedUploadResult.data?.stagedUploadsCreate?.userErrors;
+      throw new Error(`Failed to create staged upload: ${JSON.stringify(errors)}`);
+    }
+
+    const stagedTarget = stagedUploadResult.data?.stagedUploadsCreate?.stagedTargets?.[0];
+    if (!stagedTarget) {
+      throw new Error('Failed to get staged upload target');
+    }
+
+    // Step 3: Upload the tar.gz archive to the staged upload URL
+    console.log(`[${owner}/${repo}] Uploading tar.gz archive to staged upload...`);
+
     let themeId: string;
     let themeUrl: string;
 
@@ -352,78 +432,6 @@ async function createOrUpdatePreviewTheme(
       // Create new unpublished theme using GraphQL with staged upload
       console.log(`[${owner}/${repo}] Creating new preview theme...`);
 
-      // Step 1: Create a tar.gz archive of all theme files
-      const archivePath = `${tempDir}/theme.tar.gz`;
-      console.log(`[${owner}/${repo}] Creating tar.gz archive with ${themeFiles.length} files...`);
-      await createThemeArchive(themeFiles, archivePath, tempDir);
-      const archiveBuffer = readFileSync(archivePath);
-
-      // Step 2: Create a staged upload target
-      console.log(`[${owner}/${repo}] Creating staged upload...`);
-      const stagedUploadsCreateMutation = `
-        mutation stagedUploadsCreate($input: [StagedUploadInput!]!) {
-          stagedUploadsCreate(input: $input) {
-            stagedTargets {
-              resourceUrl
-              url
-              parameters {
-                name
-                value
-              }
-            }
-            userErrors {
-              field
-              message
-            }
-          }
-        }
-      `;
-
-      const stagedUploadResponse = await fetch(graphqlUrl, {
-        method: 'POST',
-        headers: {
-          'X-Shopify-Access-Token': adminApiToken,
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({
-          query: stagedUploadsCreateMutation,
-          variables: {
-            input: [{
-              resource: 'THEME',
-              filename: 'theme.tar.gz',
-              mimeType: 'application/gzip',
-              fileSize: archiveBuffer.length.toString()
-            }]
-          }
-        })
-      });
-
-      const stagedUploadResult = await stagedUploadResponse.json() as {
-        errors?: Array<{ message: string }>;
-        data?: {
-          stagedUploadsCreate?: {
-            stagedTargets?: Array<{
-              resourceUrl: string;
-              url: string;
-              parameters?: Array<{ name: string; value: string }>;
-            }>;
-            userErrors?: Array<{ field: string[]; message: string }>;
-          };
-        };
-      };
-
-      if (stagedUploadResult.errors || (stagedUploadResult.data?.stagedUploadsCreate?.userErrors?.length ?? 0 > 0)) {
-        const errors = stagedUploadResult.errors || stagedUploadResult.data?.stagedUploadsCreate?.userErrors;
-        throw new Error(`Failed to create staged upload: ${JSON.stringify(errors)}`);
-      }
-
-      const stagedTarget = stagedUploadResult.data?.stagedUploadsCreate?.stagedTargets?.[0];
-      if (!stagedTarget) {
-        throw new Error('Failed to get staged upload target');
-      }
-
-      // Step 3: Upload the tar.gz archive to the staged upload URL
-      console.log(`[${owner}/${repo}] Uploading tar.gz archive to staged upload...`);
 
       // Build multipart/form-data manually
       const boundary = `----WebKitFormBoundary${Date.now()}`;
