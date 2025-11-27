@@ -315,7 +315,8 @@ const getStagedTarget = async (
           filename: `theme-${Date.now()}.zip`,
           mimeType: 'application/zip',
           fileSize: archiveBuffer.length.toString(),
-          resource: 'FILE'
+          resource: 'FILE',
+          httpMethod: 'POST'
         }]
       }
     })
@@ -391,69 +392,6 @@ const getStagedTarget = async (
 
   // Return the resourceUrl to be used as originalSource in fileCreate
   return stagedTarget.resourceUrl;
-}
-
-const uploadToStagedTarget = async (
-  graphqlUrl: string,
-  adminApiToken: string,
-  owner: string,
-  repo: string,
-  stagedTarget: string
-): Promise<string | null> => {
-  console.log(`[${owner}/${repo}] Uploading zipped theme files to staged target...`);
-
-  const fileCreateResponse = await fetch(graphqlUrl, {
-    method: 'POST',
-    headers: {
-      'X-Shopify-Access-Token': adminApiToken,
-      'Content-Type': 'application/json',
-    },
-    body: JSON.stringify({
-      query: `
-        mutation fileCreate($files: [FileCreateInput!]!) {
-          fileCreate(files: $files) {
-            files {
-              id
-              fileStatus
-              createdAt
-            }
-            userErrors {
-              field
-              message
-            }
-          }
-        }
-      `,
-      variables: {
-        files: [
-          {
-            contentType: "FILE",
-            originalSource: stagedTarget,
-          }
-        ]
-      }
-    })
-  });
-
-  const fileCreateResult = await fileCreateResponse.json() as {
-    fileCreate: {
-      files: {
-        id: string;
-        fileStatus: string;
-        createdAt: string;
-      }[];
-    };
-    userErrors: { field: string[]; message: string }[];
-  };
-
-  console.log(`[${owner}/${repo}] File create result:`, JSON.stringify(fileCreateResult, null, 2));
-
-  if (fileCreateResult.userErrors.length ?? 0 > 0) {
-    const errors = fileCreateResult.userErrors;
-    throw new Error(`Failed to create file: ${JSON.stringify(errors)}`);
-  }
-
-  return fileCreateResult.fileCreate.files[0].id;
 }
 
 /**
