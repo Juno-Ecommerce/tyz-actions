@@ -356,6 +356,8 @@ async function createOrUpdatePreviewTheme(
       };
     };
 
+    console.log(`[${owner}/${repo}] Staged upload result:`, JSON.stringify(stagedUploadResult, null, 2));
+
     if (stagedUploadResult.errors || (stagedUploadResult.data?.stagedUploadsCreate?.userErrors?.length ?? 0 > 0)) {
       const errors = stagedUploadResult.errors || stagedUploadResult.data?.stagedUploadsCreate?.userErrors;
       throw new Error(`Failed to create staged upload: ${JSON.stringify(errors)}`);
@@ -365,9 +367,6 @@ async function createOrUpdatePreviewTheme(
     if (!stagedTarget) {
       throw new Error('Failed to get staged upload target');
     }
-
-    // Step 5: Upload the zip archive to the staged upload URL
-    console.log(`[${owner}/${repo}] Uploading zip archive to staged upload...`);
 
     let themeId: string;
     let themeUrl: string;
@@ -437,7 +436,6 @@ async function createOrUpdatePreviewTheme(
     } else {
       // Create new unpublished theme using GraphQL with staged upload
       console.log(`[${owner}/${repo}] Creating new preview theme...`);
-
 
       // Build multipart/form-data manually
       const boundary = `----WebKitFormBoundary${Date.now()}`;
