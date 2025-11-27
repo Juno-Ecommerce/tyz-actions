@@ -557,7 +557,7 @@ async function createOrUpdatePreviewTheme(
             themeCreate(source: $source, name: $name) {
               theme {
                 name
-                role
+                id
               }
               userErrors {
                 field
