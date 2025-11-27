@@ -567,10 +567,8 @@ async function createOrUpdatePreviewTheme(
           }
         `,
         variables: {
-          theme: {
-            name: `Tryzens / Preview - PR #${pr.number}`,
-            source: resourceUrl
-          }
+          name: `Tryzens / Preview - PR #${pr.number}`,
+          source: resourceUrl
         }
       })
     });
