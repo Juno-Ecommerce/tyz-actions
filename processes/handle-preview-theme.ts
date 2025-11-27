@@ -382,10 +382,12 @@ const uploadToStagedTarget = async (
         }
       `,
       variables: {
-        input: [{
-          contentType: "FILE",
-          originalSource: stagedTarget,
-        }]
+        files: [
+          {
+            contentType: "FILE",
+            originalSource: stagedTarget,
+          }
+        ]
       }
     })
   });
