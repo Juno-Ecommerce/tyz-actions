@@ -553,11 +553,11 @@ async function createOrUpdatePreviewTheme(
       },
       body: JSON.stringify({
         query: `
-          mutation themeCreate($theme: ThemeCreateInput!) {
-            themeCreate(theme: $theme) {
+           mutation themeCreate($source: URL!, $name: String!) {
+            themeCreate(source: $source, name: $name) {
               theme {
-                id
                 name
+                role
               }
               userErrors {
                 field
