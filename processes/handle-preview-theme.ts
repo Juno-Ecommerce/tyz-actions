@@ -9,6 +9,17 @@ const require = createRequire(import.meta.url);
 const archiver = require("archiver");
 
 /**
+ * Formats the current date as DD/MM/YY
+ */
+function formatDateDDMMYY(): string {
+  const now = new Date();
+  const day = String(now.getDate()).padStart(2, "0");
+  const month = String(now.getMonth() + 1).padStart(2, "0");
+  const year = String(now.getFullYear()).slice(-2);
+  return `${day}/${month}/${year}`;
+}
+
+/**
  * Extracts the store name from a Shopify admin URL in the repo homepage
  * Example: "https://admin.shopify.com/store/store-name" -> "store-name"
  */
@@ -500,7 +511,7 @@ async function createOrUpdatePreviewTheme(
         variables: {
           id: `gid://shopify/OnlineStoreTheme/${existingThemeId}`,
           input: {
-            name: `Tryzens/Preview - PR #${pr.number} ${Date.now()}`
+            name: `Tryzens/Preview - PR #${pr.number} (${formatDateDDMMYY()})`
           }
         }
       })
@@ -560,7 +571,7 @@ async function createOrUpdatePreviewTheme(
           }
         `,
         variables: {
-          name: `Tryzens/Preview - PR #${pr.number} ${Date.now()}`,
+          name: `Tryzens/Preview - PR #${pr.number} (${formatDateDDMMYY()})`,
           source: resourceUrl
         }
       })
