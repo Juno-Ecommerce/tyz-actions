@@ -517,26 +517,26 @@ async function createOrUpdatePreviewTheme(
       })
     });
 
-    const createResult = (await createResponse.json()) as {
+    const updateResult = (await createResponse.json()) as {
       data: {
-        themeCreate: {
+        themeUpdate: {
           theme: {
             id: string;
             name: string;
           };
-          userErrors: Array<{ field: string[]; message: string }>;
+          userErrors: { field: string[]; message: string }[];
         };
       };
     };
 
-    console.log(`[${owner}/${repo}] Create result:`, JSON.stringify(createResult, null, 2));
+    console.log(`[${owner}/${repo}] Create result:`, JSON.stringify(updateResult, null, 2));
 
-    if (createResult.data.themeCreate.userErrors.length > 0) {
-      const errors = createResult.data.themeCreate.userErrors;
+    if (updateResult.data.themeUpdate.userErrors.length > 0) {
+      const errors = updateResult.data.themeUpdate.userErrors;
       throw new Error(`Failed to create theme: ${JSON.stringify(errors)}`);
     }
 
-    const themeGid = createResult.data.themeCreate.theme.id;
+    const themeGid = updateResult.data.themeUpdate.theme.id;
     if (!themeGid) {
       throw new Error("Failed to get theme ID from create response");
     }
