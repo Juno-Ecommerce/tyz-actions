@@ -464,9 +464,7 @@ async function createOrUpdatePreviewTheme(
       tempDir,
       adminApiToken
     );
-    if (!resourceUrl) {
-      throw new Error("Failed to upload file and get resource URL");
-    }
+    if (!resourceUrl) throw new Error("Failed to upload file and get resource URL");
 
     let themeId: string;
     let themeUrl: string;
@@ -548,21 +546,6 @@ async function createOrUpdatePreviewTheme(
     } else {
       console.log(`[${owner}/${repo}] Creating new preview theme...`);
 
-      const createThemeMutation = `
-        mutation themeCreate($theme: ThemeCreateInput!) {
-          themeCreate(theme: $theme) {
-            theme {
-              id
-              name
-            }
-            userErrors {
-              field
-              message
-            }
-          }
-        }
-      `;
-
       const createResponse = await fetch(graphqlUrl, {
         method: "POST",
         headers: {
@@ -570,36 +553,47 @@ async function createOrUpdatePreviewTheme(
           "Content-Type": "application/json"
         },
         body: JSON.stringify({
-          query: createThemeMutation,
+          query: `
+            mutation themeCreate($theme: ThemeCreateInput!) {
+              themeCreate(theme: $theme) {
+                theme {
+                  id
+                  name
+                }
+                userErrors {
+                  field
+                  message
+                }
+              }
+            }
+          `,
           variables: {
             theme: {
-              name: `Preview - PR #${pr.number}`,
-              role: "DEVELOPMENT",
-              originalSource: resourceUrl
+              name: `Tryzens / Preview - PR #${pr.number}`,
+              source: resourceUrl
             }
           }
         })
       });
 
       const createResult = (await createResponse.json()) as {
-        errors?: Array<{ message: string }>;
-        data?: {
-          themeCreate?: {
-            theme?: {
+        data: {
+          themeCreate: {
+            theme: {
               id: string;
               name: string;
             };
-            userErrors?: Array<{ field: string[]; message: string }>;
+            userErrors: Array<{ field: string[]; message: string }>;
           };
         };
       };
 
-      if (createResult.errors || (createResult.data?.themeCreate?.userErrors?.length ?? 0) > 0) {
-        const errors = createResult.errors || createResult.data?.themeCreate?.userErrors;
+      if (createResult.data.themeCreate.userErrors.length > 0) {
+        const errors = createResult.data.themeCreate.userErrors;
         throw new Error(`Failed to create theme: ${JSON.stringify(errors)}`);
       }
 
-      const themeGid = createResult.data?.themeCreate?.theme?.id;
+      const themeGid = createResult.data.themeCreate.theme.id;
       if (!themeGid) {
         throw new Error("Failed to get theme ID from create response");
       }
