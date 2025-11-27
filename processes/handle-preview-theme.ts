@@ -182,7 +182,7 @@ async function saveThemeIdToDescription(
     // Remove existing Preview Theme ID section if present
     // Match the warning block pattern (multiline)
     updatedBody = updatedBody.replace(
-      /\n?\n?⚠️\s*WARNING:.*?\n.*?\[preview-theme-id:\d+\].*?\n.*?⚠️\s*Only remove.*?⚠️/gs,
+      /\n+\s*⚠️\s*WARNING:.*?\n.*?\[preview-theme-id:\d+\].*?\n.*?⚠️\s*Only remove.*?⚠️/gs,
       ""
     );
     // Also remove any old formats
