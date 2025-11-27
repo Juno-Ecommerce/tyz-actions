@@ -174,7 +174,7 @@ async function downloadRepositoryArchive(
 
     // Clean up archive file
     const { unlink } = await import("node:fs/promises");
-    await unlink(archivePath).catch(() => {
+    await unlink(archivePath).catch((error: any) => {
       console.error(`[${owner}/${repo}] Error cleaning up archive file:`, error.message);
     });
 
@@ -188,7 +188,17 @@ async function downloadRepositoryArchive(
 /**
  * Recursively gets all files in Shopify folders
  */
-function getShopifyFiles(dir: string, baseDir: string = dir, shopifyFolders: string[]): Array<{ path: string; content: Buffer }> {
+function getShopifyFiles(
+  owner: string,
+  repo: string,
+  dir: string,
+  baseDir: string = dir
+): Array<{ path: string; content: Buffer }> {
+  console.log(`[${owner}/${repo}] Reading Shopify theme files...`);
+
+  // Define Shopify folders to push (exclude build files)
+  const shopifyFolders = ['assets', 'blocks', 'config', 'layout', 'locales', 'sections', 'snippets', 'templates'];
+
   const files: Array<{ path: string; content: Buffer }> = [];
 
   try {
@@ -200,7 +210,7 @@ function getShopifyFiles(dir: string, baseDir: string = dir, shopifyFolders: str
       const stat = statSync(fullPath);
 
       // Check if this file is in a Shopify folder
-      const isInShopifyFolder = shopifyFolders.some(folder => 
+      const isInShopifyFolder = shopifyFolders.some(folder =>
         relativePath.startsWith(folder + '/') || relativePath === folder
       );
 
@@ -208,7 +218,7 @@ function getShopifyFiles(dir: string, baseDir: string = dir, shopifyFolders: str
 
       if (stat.isDirectory()) {
         // Recursively get files from subdirectories
-        files.push(...getShopifyFiles(fullPath, baseDir, shopifyFolders));
+        files.push(...getShopifyFiles(owner, repo, fullPath, baseDir));
       } else if (stat.isFile()) {
         // Read file content
         const content = readFileSync(fullPath);
@@ -218,6 +228,8 @@ function getShopifyFiles(dir: string, baseDir: string = dir, shopifyFolders: str
   } catch (error) {
     // Ignore errors reading directories
   }
+
+  console.log(`[${owner}/${repo}] Found ${files.length} theme files to upload`);
 
   return files;
 }
@@ -267,13 +279,8 @@ async function createOrUpdatePreviewTheme(
 
     await downloadRepositoryArchive(octokit, owner, repo, pr, tempDir);
 
-    // Define Shopify folders to push (exclude build files)
-    const shopifyFolders = ['assets', 'blocks', 'config', 'layout', 'locales', 'sections', 'snippets', 'templates'];
-
     // Get all files from Shopify folders
-    console.log(`[${owner}/${repo}] Reading Shopify theme files...`);
-    const themeFiles = getShopifyFiles(tempDir, tempDir, shopifyFolders);
-    console.log(`[${owner}/${repo}] Found ${themeFiles.length} theme files to upload`);
+    const themeFiles = getShopifyFiles(owner, repo, tempDir);
 
     const graphqlUrl = `https://${storeName}.myshopify.com/admin/api/2025-10/graphql.json`;
     let themeId: string;
