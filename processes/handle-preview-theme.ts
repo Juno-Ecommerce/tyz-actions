@@ -624,19 +624,16 @@ async function createOrUpdatePreviewTheme(
     tempDir,
     adminApiToken
   );
-  if (!resourceUrl)
-    throw new Error("Failed to upload file and get resource URL");
 
-    let themeId: string;
-    let themeUrl: string;
+  if (!resourceUrl) throw new Error("Failed to upload file and get resource URL");
 
-    if (existingThemeId) {
-    console.log(
-      `[${owner}/${repo}] Updating existing preview theme ${existingThemeId}...`
-    );
+  let themeId: string;
+  let themeUrl: string;
+
+  if (existingThemeId) { 
+    console.log(`[${owner}/${repo}] Updating existing preview theme ${existingThemeId}...`);
+
     themeId = existingThemeId;
-
-    console.log(`[${owner}/${repo}] Updating new preview theme...`);
 
     const createResponse = await fetch(graphqlUrl, {
       method: "POST",
@@ -691,9 +688,7 @@ async function createOrUpdatePreviewTheme(
     }
 
     const themeGid = updateResult.data.themeUpdate.theme.id;
-    if (!themeGid) {
-      throw new Error("Failed to get theme ID from update response");
-    }
+    if (!themeGid) throw new Error("Failed to get theme ID from update response");
     themeId = themeGid.split("/").pop() || "";
 
     themeUrl = `https://${storeName}.myshopify.com/admin/themes/${themeId}`;
@@ -703,8 +698,8 @@ async function createOrUpdatePreviewTheme(
 
     await saveThemeIdToDescription(octokit, owner, repo, pr.number, themeId);
     await commentPreviewThemeId(octokit, owner, repo, pr.number, themeId, storeName, "update");
-    } else {
-      console.log(`[${owner}/${repo}] Creating new preview theme...`);
+  } else {
+    console.log(`[${owner}/${repo}] Creating new preview theme...`);
 
     const createResponse = await fetch(graphqlUrl, {
       method: "POST",
@@ -746,10 +741,7 @@ async function createOrUpdatePreviewTheme(
       };
     };
 
-    console.log(
-      `[${owner}/${repo}] Create result:`,
-      JSON.stringify(createResult, null, 2)
-    );
+    console.log(`[${owner}/${repo}] Create result:`, JSON.stringify(createResult, null, 2));
 
     if (createResult.data.themeCreate.userErrors.length > 0) {
       const errors = createResult.data.themeCreate.userErrors;
@@ -763,15 +755,13 @@ async function createOrUpdatePreviewTheme(
     themeId = themeGid.split("/").pop() || "";
 
     themeUrl = `https://${storeName}.myshopify.com/admin/themes/${themeId}`;
-    console.log(
-      `[${owner}/${repo}] Successfully created preview theme ${themeId}`
-    );
+    console.log(`[${owner}/${repo}] Successfully created preview theme ${themeId}`);
 
     await saveThemeIdToDescription(octokit, owner, repo, pr.number, themeId);
     await commentPreviewThemeId(octokit, owner, repo, pr.number, themeId, storeName, "create");
-    }
+  }
 
-    // Clean up temporary directory
+  // Clean up temporary directory
   const { rm } = await import("node:fs/promises");
   await rm(tempDir, { recursive: true, force: true }).catch(
     (error: unknown) => {
@@ -782,7 +772,7 @@ async function createOrUpdatePreviewTheme(
     }
   );
 
-    console.log(`[${owner}/${repo}] Preview theme ready: ${themeUrl}`);
+  console.log(`[${owner}/${repo}] Preview theme ready: ${themeUrl}`);
 }
 
 /**
@@ -823,10 +813,7 @@ export async function handlePreviewTheme(
       adminApiToken
     );
   } catch (error: any) {
-    console.error(
-      `[${owner}/${repo}] Error handling preview generation, please contact a senior developer.`,
-      error.message
-    );
+    console.error(`[${owner}/${repo}] Error handling preview generation, please contact a senior developer.`, error.message);
 
     await octokit.request(
       "POST /repos/{owner}/{repo}/issues/{issue_number}/comments",
@@ -835,7 +822,7 @@ export async function handlePreviewTheme(
         repo,
         issue_number: pr.number,
         body: `❌ Error creating preview theme: ${error.message}`,
-    }
+      }
     );
   }
 }
