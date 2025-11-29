@@ -7,7 +7,7 @@ import { IncomingMessage, ServerResponse } from "node:http";
 import { updateParentOnSGCPush } from "./processes/update-parent-on-sgc-push.js";
 import { updateStagingOnProductionPush } from "./processes/update-staging-on-production-push.js";
 import { updateSGCOnParentPush } from "./processes/update-sgc-on-parent-push.js";
-import { handlePreviewTheme } from "./processes/handle-preview-theme.js";
+import { handlePreviewTheme, deletePreviewTheme } from "./processes/handle-preview-theme.js";
 
 const { APP_ID, PRIVATE_KEY, WEBHOOK_SECRET } = process.env;
 invariant(APP_ID, "APP_ID required");
@@ -142,6 +142,18 @@ webhooks.on("pull_request", async ({ payload }) => {
 
       break;
     case "closed":
+      // Handle preview theme deletion when PR is merged
+      if (payload.pull_request.merged) {
+        const hasPreviewLabel = payload.pull_request.labels?.some(
+          (label: any) => label.name?.toLowerCase() === 'preview'
+        );
+
+        if (hasPreviewLabel) {
+          console.log(`[${owner}/${repo}] PR #${payload.pull_request.number} merged, deleting preview theme...`);
+          await deletePreviewTheme(octokit, owner, repo, payload.pull_request);
+        }
+      }
+
       // Only process when PR is merged into production
       if (!payload.pull_request.merged || payload.pull_request.base.ref !== "production") {
         return;

@@ -776,6 +776,136 @@ async function createOrUpdatePreviewTheme(
 }
 
 /**
+ * Deletes a preview theme when PR is merged
+ */
+export async function deletePreviewTheme(
+  octokit: Octokit,
+  owner: string,
+  repo: string,
+  pr: PullRequest
+): Promise<void> {
+  try {
+    const storeName = await extractStoreNameFromHomepage(
+      octokit,
+      owner,
+      repo,
+      pr
+    );
+    if (!storeName) {
+      console.log(`[${owner}/${repo}] No store name found, skipping theme deletion`);
+      return;
+    }
+
+    const adminApiToken = await getAdminApiToken(octokit, pr, owner, repo);
+    if (!adminApiToken) {
+      console.log(`[${owner}/${repo}] No admin API token found, skipping theme deletion`);
+      return;
+    }
+
+    const existingThemeId = await getExistingPreviewThemeId(
+      octokit,
+      owner,
+      repo,
+      pr.number
+    );
+
+    if (!existingThemeId) {
+      console.log(`[${owner}/${repo}] No preview theme ID found in PR description, skipping deletion`);
+      return;
+    }
+
+    const graphqlUrl = `https://${storeName}.myshopify.com/admin/api/2025-10/graphql.json`;
+
+    console.log(`[${owner}/${repo}] Deleting preview theme ${existingThemeId}...`);
+
+    const deleteResponse = await fetch(graphqlUrl, {
+      method: "POST",
+      headers: {
+        "X-Shopify-Access-Token": adminApiToken,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        query: `
+          mutation themeDelete($id: ID!) {
+            themeDelete(id: $id) {
+              deletedThemeId
+              userErrors {
+                field
+                message
+              }
+            }
+          }
+        `,
+        variables: {
+          id: `gid://shopify/OnlineStoreTheme/${existingThemeId}`,
+        },
+      }),
+    });
+
+    if (!deleteResponse.ok) {
+      const text = await deleteResponse.text();
+      throw new Error(
+        `themeDelete failed: ${deleteResponse.status} ${deleteResponse.statusText} ${text}`
+      );
+    }
+
+    const deleteResult = (await deleteResponse.json()) as {
+      data?: {
+        themeDelete: {
+          deletedThemeId: string | null;
+          userErrors: { field: string[]; message: string }[];
+        };
+      };
+      errors?: { message: string }[];
+    };
+
+    console.log(`[${owner}/${repo}] Delete result:`, JSON.stringify(deleteResult, null, 2));
+
+    if (deleteResult.errors?.length) {
+      throw new Error(`Failed to delete theme (top-level errors): ${JSON.stringify(deleteResult.errors)}`);
+    }
+
+    const themeDelete = deleteResult.data?.themeDelete;
+    if (!themeDelete) {
+      throw new Error("themeDelete missing in response");
+    }
+
+    if (themeDelete.userErrors.length > 0) {
+      const errors = themeDelete.userErrors;
+      throw new Error(`Failed to delete theme: ${JSON.stringify(errors)}`);
+    }
+
+    console.log(`[${owner}/${repo}] Successfully deleted preview theme ${existingThemeId}`);
+
+    // Comment on PR about successful deletion
+    await octokit.request(
+      "POST /repos/{owner}/{repo}/issues/{issue_number}/comments",
+      {
+        owner,
+        repo,
+        issue_number: pr.number,
+        body: `✅ Preview theme ${existingThemeId} has been deleted successfully.`,
+      }
+    );
+  } catch (error: any) {
+    console.error(
+      `[${owner}/${repo}] Error deleting preview theme:`,
+      error.message
+    );
+
+    await octokit.request(
+      "POST /repos/{owner}/{repo}/issues/{issue_number}/comments",
+      {
+        owner,
+        repo,
+        issue_number: pr.number,
+        body: `⚠️ Error deleting preview theme: ${error.message}. The theme may need to be deleted manually.`,
+      }
+    );
+  }
+}
+
+/**
  * Handles the preview label being added to a PR
  */
 export async function handlePreviewTheme(
