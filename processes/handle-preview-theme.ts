@@ -10,10 +10,10 @@ import {
 import { join } from "node:path";
 import { createRequire } from "node:module";
 import * as tar from "tar";
+import lighthouse from "lighthouse";
 
 const require = createRequire(import.meta.url);
 const archiver = require("archiver");
-const lighthouse = require("lighthouse");
 const chromeLauncher = require("chrome-launcher");
 
 /**
