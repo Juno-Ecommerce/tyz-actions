@@ -207,7 +207,9 @@ async function extractStoreNameFromHomepage(
 }
 
 /**
- * Gets the Admin API token for the store. This should be set as a Custom App on each store with Admin API Access for read_themes and write_themes scopes.
+ * Gets the Admin API token for the store from GitHub repository variables.
+ * This should be set as a repository variable called TYZ_ACTIONS_ACCESS_KEY.
+ * The token should be a Custom App on each store with Admin API Access for read_themes and write_themes scopes.
  * @returns The Admin API token for the store
  */
 const getAdminApiToken = async (
@@ -216,25 +218,53 @@ const getAdminApiToken = async (
   owner: string,
   repo: string
 ): Promise<string | undefined> => {
-  if (process.env.SHOPIFY_THEME_ACCESS_TOKEN) {
-    return process.env.SHOPIFY_THEME_ACCESS_TOKEN;
-  } else {
-    console.error(
-      `[${owner}/${repo}] SHOPIFY_THEME_ACCESS_TOKEN environment variable is not set`
-    );
-
-    await octokit.request(
-      "POST /repos/{owner}/{repo}/issues/{issue_number}/comments",
+  try {
+    // Fetch the repository variable TYZ_ACTIONS_ACCESS_KEY
+    const { data: variable } = await octokit.request(
+      "GET /repos/{owner}/{repo}/actions/variables/{name}",
       {
         owner,
         repo,
-        issue_number: pr.number,
-        body: "❌ SHOPIFY_THEME_ACCESS_TOKEN environment variable is not set. This should be a store-specific Admin API access token.",
+        name: "TYZ_ACTIONS_ACCESS_KEY",
       }
     );
 
+    if (variable.value) {
+      return variable.value;
+    }
+  } catch (error: any) {
+    console.error(
+      `[${owner}/${repo}] Failed to fetch TYZ_ACTIONS_ACCESS_KEY repository variable:`,
+      error.message
+    );
+
+    // Check if it's a 404 (variable doesn't exist) or other error
+    if (error.status === 404) {
+      await octokit.request(
+        "POST /repos/{owner}/{repo}/issues/{issue_number}/comments",
+        {
+          owner,
+          repo,
+          issue_number: pr.number,
+          body: "❌ TYZ_ACTIONS_ACCESS_KEY repository variable is not set. Please add this variable in your repository settings (Settings > Secrets and variables > Actions > Variables). This should be a store-specific Admin API access token.",
+        }
+      );
+    } else {
+      await octokit.request(
+        "POST /repos/{owner}/{repo}/issues/{issue_number}/comments",
+        {
+          owner,
+          repo,
+          issue_number: pr.number,
+          body: `❌ Error fetching TYZ_ACTIONS_ACCESS_KEY repository variable: ${error.message}. Please ensure the variable exists and the app has the necessary permissions.`,
+        }
+      );
+    }
+
     return undefined;
   }
+
+  return undefined;
 };
 
 /**
