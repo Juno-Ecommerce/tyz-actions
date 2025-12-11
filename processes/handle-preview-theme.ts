@@ -332,6 +332,9 @@ async function runLighthouseAudit(
       output: "json" as const,
       onlyCategories: ["performance", "accessibility", "best-practices", "seo"],
       port: chrome.port,
+      settings: {
+        locale: 'en'
+      }
     };
 
     const runnerResult = await lighthouse(previewUrl, options);
