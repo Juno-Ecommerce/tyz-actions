@@ -4,10 +4,10 @@
   "routes": [{ "src": "/(.*)", "dest": "/server.ts" }],
   "functions": {
     "server.ts": {
-      "outputFileTracingIncludes": {
-        "node_modules/lighthouse/**": "*",
-        "node_modules/chrome-launcher/**": "*"
-      }
+      "includeFiles": [
+        "node_modules/lighthouse/**",
+        "node_modules/chrome-launcher/**"
+      ]
     }
   }
 }
