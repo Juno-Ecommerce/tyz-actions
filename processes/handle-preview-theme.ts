@@ -406,25 +406,25 @@ async function commentPreviewThemeId(
 
     const createBody = `
       Preview theme successfully created!
-
+      \n\n
       Theme URL: https://${storeName}.myshopify.com?preview_theme_id=${themeId}
       Customiser URL: https://${storeName}.myshopify.com/admin/themes/${themeId}/editor
       Code URL: https://${storeName}.myshopify.com/admin/themes/${themeId}
-
+      \n\n
       This theme will be updated automatically when you push changes to this PR.
-
+      \n\n
       The theme ID has been saved into the PR description. Please only remove this id from your PR description if you want to create a new preview theme.
-
+      \n\n
       ${lighthouseSection}
     `;
 
     const updateBody = `
       Preview theme successfully updated!
-
+      \n\n
       Theme URL: https://${storeName}.myshopify.com?preview_theme_id=${themeId}
       Customiser URL: https://${storeName}.myshopify.com/admin/themes/${themeId}/editor
       Code URL: https://${storeName}.myshopify.com/admin/themes/${themeId}
-
+      \n\n
       ${lighthouseSection}
     `;
 
