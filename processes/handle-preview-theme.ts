@@ -33,6 +33,127 @@ function delay(ms: number): Promise<void> {
 }
 
 /**
+ * Checks if a theme is ready by querying its status via GraphQL
+ */
+async function isThemeReady(
+  graphqlUrl: string,
+  adminApiToken: string,
+  themeId: string,
+  storeName: string,
+  owner: string,
+  repo: string
+): Promise<boolean> {
+  try {
+    const response = await fetch(graphqlUrl, {
+      method: "POST",
+      headers: {
+        "X-Shopify-Access-Token": adminApiToken,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        query: `
+          query getThemeStatus($id: ID!) {
+            theme(id: $id) {
+              processing
+            }
+          }
+        `,
+        variables: {
+          id: `gid://shopify/OnlineStoreTheme/${themeId}`,
+        },
+      }),
+    });
+
+    if (!response.ok) {
+      return false;
+    }
+
+    const result = (await response.json()) as {
+      data?: {
+        theme: {
+          processing: boolean;
+        } | null;
+      };
+      errors?: { message: string }[];
+    };
+
+    // If there are errors or theme is null, it's not ready
+    if (result.errors?.length || !result.data?.theme || result.data.theme.processing === true) {
+      return false;
+    }
+
+    // Theme exists and is accessible via GraphQL
+    // Also check if we can access the preview URL to confirm it's fully processed
+    const previewUrl = `https://${storeName}.myshopify.com?preview_theme_id=${themeId}`;
+
+    try {
+      const previewResponse = await fetch(previewUrl, {
+        method: "HEAD",
+        redirect: "follow",
+      });
+      // If we get a 200 or redirect, the theme is likely ready
+      return previewResponse.ok || previewResponse.status < 400;
+    } catch {
+      // If preview check fails, assume theme is ready if GraphQL query succeeded
+      return true;
+    }
+  } catch (error: any) {
+    console.error(
+      `[${owner}/${repo}] Error checking theme status:`,
+      error.message
+    );
+    return false;
+  }
+}
+
+/**
+ * Polls the theme status every 5 seconds until it's ready
+ * Returns true when ready, false if timeout is reached
+ */
+async function waitForThemeReady(
+  graphqlUrl: string,
+  adminApiToken: string,
+  themeId: string,
+  storeName: string,
+  owner: string,
+  repo: string,
+  maxWaitTime: number = 5 * 60 * 1000 // 5 minutes max
+): Promise<boolean> {
+  const startTime = Date.now();
+  const pollInterval = 5 * 1000; // 5 seconds
+
+  console.log(
+    `[${owner}/${repo}] Polling theme ${themeId} status every 5 seconds...`
+  );
+
+  while (Date.now() - startTime < maxWaitTime) {
+    const isReady = await isThemeReady(
+      graphqlUrl,
+      adminApiToken,
+      themeId,
+      storeName,
+      owner,
+      repo
+    );
+
+    if (isReady) {
+      console.log(
+        `[${owner}/${repo}] Theme ${themeId} is ready after ${Math.round((Date.now() - startTime) / 1000)} seconds`
+      );
+      return true;
+    }
+
+    // Wait 5 seconds before next poll
+    await delay(pollInterval);
+  }
+
+  console.warn(
+    `[${owner}/${repo}] Theme ${themeId} did not become ready within ${maxWaitTime / 1000} seconds`
+  );
+  return false;
+}
+
+/**
  * Extracts the store name from a Shopify admin URL in the repo homepage
  * Example: "https://admin.shopify.com/store/store-name" -> "store-name"
  */
@@ -913,9 +1034,15 @@ async function createOrUpdatePreviewTheme(
 
     await saveThemeIdToDescription(octokit, owner, repo, pr.number, themeId);
 
-    // Wait 2 minutes for the theme to be fully deployed before running Lighthouse
-    console.log(`[${owner}/${repo}] Waiting 2 minutes for theme to be fully deployed...`);
-    await delay(2 * 60 * 1000); // 2 minutes
+    // Poll theme status every 5 seconds until it's ready
+    await waitForThemeReady(
+      graphqlUrl,
+      adminApiToken,
+      themeId,
+      storeName,
+      owner,
+      repo
+    );
 
     // Run Lighthouse audit on the preview theme
     const previewUrl = `https://${storeName}.myshopify.com?preview_theme_id=${themeId}`;
@@ -992,9 +1119,15 @@ async function createOrUpdatePreviewTheme(
 
     await saveThemeIdToDescription(octokit, owner, repo, pr.number, themeId);
 
-    // Wait 2 minutes for the theme to be fully deployed before running Lighthouse
-    console.log(`[${owner}/${repo}] Waiting 2 minutes for theme to be fully deployed...`);
-    await delay(2 * 60 * 1000); // 2 minutes
+    // Poll theme status every 5 seconds until it's ready
+    await waitForThemeReady(
+      graphqlUrl,
+      adminApiToken,
+      themeId,
+      storeName,
+      owner,
+      repo
+    );
 
     // Run Lighthouse audit on the preview theme
     const previewUrl = `https://${storeName}.myshopify.com?preview_theme_id=${themeId}`;
