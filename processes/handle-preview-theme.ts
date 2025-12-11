@@ -10,11 +10,12 @@ import {
 import { join } from "node:path";
 import { createRequire } from "node:module";
 import * as tar from "tar";
-import lighthouse from "lighthouse";
+import fs from 'fs';
+import lighthouse from 'lighthouse';
+import * as chromeLauncher from 'chrome-launcher';
 
 const require = createRequire(import.meta.url);
 const archiver = require("archiver");
-const chromeLauncher = require("chrome-launcher");
 
 /**
  * Formats the current date as DD/MM/YY
@@ -331,10 +332,7 @@ async function runLighthouseAudit(
       logLevel: "info" as const,
       output: "json" as const,
       onlyCategories: ["performance", "accessibility", "best-practices", "seo"],
-      port: chrome.port,
-      settings: {
-        locale: 'en'
-      }
+      port: chrome.port
     };
 
     const runnerResult = await lighthouse(previewUrl, options);
