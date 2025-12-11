@@ -325,12 +325,12 @@ async function runLighthouseAudit(
     if (!process.env.LIGHTHOUSE_LOCALE) {
       process.env.LIGHTHOUSE_LOCALE = "en";
     }
-    
+
     // Dynamically import to avoid loading assets/locales at module initialization
     // This prevents ENOENT errors for missing files in serverless environments
     let chromeLauncherModule;
     let lighthouseModule;
-    
+
     try {
       chromeLauncherModule = await import("chrome-launcher");
       lighthouseModule = await import("lighthouse");
