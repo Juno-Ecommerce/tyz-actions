@@ -13,6 +13,8 @@ import * as tar from "tar";
 
 const require = createRequire(import.meta.url);
 const archiver = require("archiver");
+const lighthouse = require("lighthouse");
+const chromeLauncher = require("chrome-launcher");
 
 /**
  * Formats the current date as DD/MM/YY
@@ -23,6 +25,13 @@ function formatDateDDMMYY(): string {
   const month = String(now.getMonth() + 1).padStart(2, "0");
   const year = String(now.getFullYear()).slice(-2);
   return `${day}/${month}/${year}`;
+}
+
+/**
+ * Delays execution for the specified number of milliseconds
+ */
+function delay(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
 /**
@@ -218,7 +227,7 @@ async function saveThemeIdToDescription(
 }
 
 /**
- * Creates a comment on the PR with the preview theme ID
+ * Creates a comment on the PR with the preview theme ID and optional Lighthouse results
  */
 async function commentPreviewThemeId(
   octokit: Octokit,
@@ -227,28 +236,48 @@ async function commentPreviewThemeId(
   prNumber: number,
   themeId: string,
   storeName: string,
-  method: "create" | "update"
+  method: "create" | "update",
+  lighthouseResults?: {
+    performance: number;
+    accessibility: number;
+    bestPractices: number;
+    seo: number;
+    metrics?: {
+      firstContentfulPaint?: number;
+      largestContentfulPaint?: number;
+      totalBlockingTime?: number;
+      cumulativeLayoutShift?: number;
+      speedIndex?: number;
+    };
+  }
 ): Promise<void> {
-  const createBody = `
-    Preview theme successfully created!
+  const lighthouseSection = lighthouseResults
+    ? formatLighthouseResults(lighthouseResults)
+    : "\n\n⏳ Calculating Lighthouse score...";
 
-    Theme URL: https://${storeName}.myshopify.com?preview_theme_id=${themeId}
-    Customiser URL: https://${storeName}.myshopify.com/admin/themes/${themeId}/editor
-    Code URL: https://${storeName}.myshopify.com/admin/themes/${themeId}
-    \n
-    \n
-    This theme will be updated automatically when you push changes to this PR.
-    \n
-    The theme ID has been saved into the PR description. Please only remove this id from your PR description if you want to create a new preview theme.
-  `;
+    const createBody = `
+      Preview theme successfully created!
 
-  const updateBody = `
-    Preview theme successfully updated!
+      Theme URL: https://${storeName}.myshopify.com?preview_theme_id=${themeId}
+      Customiser URL: https://${storeName}.myshopify.com/admin/themes/${themeId}/editor
+      Code URL: https://${storeName}.myshopify.com/admin/themes/${themeId}
 
-    Theme URL: https://${storeName}.myshopify.com?preview_theme_id=${themeId}
-    Customiser URL: https://${storeName}.myshopify.com/admin/themes/${themeId}/editor
-    Code URL: https://${storeName}.myshopify.com/admin/themes/${themeId}
-  `;
+      This theme will be updated automatically when you push changes to this PR.
+
+      The theme ID has been saved into the PR description. Please only remove this id from your PR description if you want to create a new preview theme.
+
+      ${lighthouseSection}
+    `;
+
+    const updateBody = `
+      Preview theme successfully updated!
+
+      Theme URL: https://${storeName}.myshopify.com?preview_theme_id=${themeId}
+      Customiser URL: https://${storeName}.myshopify.com/admin/themes/${themeId}/editor
+      Code URL: https://${storeName}.myshopify.com/admin/themes/${themeId}
+
+      ${lighthouseSection}
+    `;
 
   try {
     await octokit.request(
@@ -266,6 +295,160 @@ async function commentPreviewThemeId(
       error.message
     );
   }
+}
+
+/**
+ * Runs a Lighthouse audit on the preview theme URL
+ */
+async function runLighthouseAudit(
+  owner: string,
+  repo: string,
+  previewUrl: string
+): Promise<{
+  performance: number;
+  accessibility: number;
+  bestPractices: number;
+  seo: number;
+  metrics?: {
+    firstContentfulPaint?: number;
+    largestContentfulPaint?: number;
+    totalBlockingTime?: number;
+    cumulativeLayoutShift?: number;
+    speedIndex?: number;
+  };
+} | null> {
+  let chrome: any = null;
+
+  try {
+    console.log(`[${owner}/${repo}] Starting Lighthouse audit for ${previewUrl}...`);
+
+    // Launch Chrome
+    chrome = await chromeLauncher.launch({
+      chromeFlags: ["--headless", "--no-sandbox", "--disable-gpu"],
+    });
+
+    const options = {
+      logLevel: "info" as const,
+      output: "json" as const,
+      onlyCategories: ["performance", "accessibility", "best-practices", "seo"],
+      port: chrome.port,
+    };
+
+    const runnerResult = await lighthouse(previewUrl, options);
+
+    if (!runnerResult) {
+      console.error(`[${owner}/${repo}] Lighthouse returned no results`);
+      return null;
+    }
+
+    const lhr = runnerResult.lhr;
+    const categories = lhr.categories;
+
+    const performance = Math.round((categories.performance?.score || 0) * 100);
+    const accessibility = Math.round((categories.accessibility?.score || 0) * 100);
+    const bestPractices = Math.round((categories["best-practices"]?.score || 0) * 100);
+    const seo = Math.round((categories.seo?.score || 0) * 100);
+
+    // Extract key metrics
+    const metrics = lhr.audits;
+    const firstContentfulPaint = metrics["first-contentful-paint"]?.numericValue;
+    const largestContentfulPaint = metrics["largest-contentful-paint"]?.numericValue;
+    const totalBlockingTime = metrics["total-blocking-time"]?.numericValue;
+    const cumulativeLayoutShift = metrics["cumulative-layout-shift"]?.numericValue;
+    const speedIndex = metrics["speed-index"]?.numericValue;
+
+    console.log(`[${owner}/${repo}] Lighthouse audit completed:
+      Performance: ${performance}
+      Accessibility: ${accessibility}
+      Best Practices: ${bestPractices}
+      SEO: ${seo}`);
+
+    return {
+      performance,
+      accessibility,
+      bestPractices,
+      seo,
+      metrics: {
+        firstContentfulPaint,
+        largestContentfulPaint,
+        totalBlockingTime,
+        cumulativeLayoutShift,
+        speedIndex,
+      },
+    };
+  } catch (error: any) {
+    console.error(`[${owner}/${repo}] Error running Lighthouse audit:`, error.message);
+    return null;
+  } finally {
+    if (chrome) {
+      await chrome.kill();
+    }
+  }
+}
+
+/**
+ * Formats Lighthouse scores with emoji indicators
+ */
+function formatScore(score: number): string {
+  if (score >= 90) return `🟢 ${score}`;
+  if (score >= 50) return `🟡 ${score}`;
+  return `🔴 ${score}`;
+}
+
+/**
+ * Formats a metric value with appropriate units
+ */
+function formatMetric(value: number | undefined, unit: string): string {
+  if (value === undefined) return "N/A";
+  if (unit === "ms") return `${Math.round(value)}ms`;
+  if (unit === "s") return `${(value / 1000).toFixed(2)}s`;
+  return `${value.toFixed(2)}`;
+}
+
+/**
+ * Formats Lighthouse results as markdown
+ */
+function formatLighthouseResults(results: {
+  performance: number;
+  accessibility: number;
+  bestPractices: number;
+  seo: number;
+  metrics?: {
+    firstContentfulPaint?: number;
+    largestContentfulPaint?: number;
+    totalBlockingTime?: number;
+    cumulativeLayoutShift?: number;
+    speedIndex?: number;
+  };
+}): string {
+  const { performance, accessibility, bestPractices, seo, metrics } = results;
+
+  const metricsSection = metrics
+    ? `
+      ### Performance Metrics
+      - **First Contentful Paint**: ${formatMetric(metrics.firstContentfulPaint, "ms")}
+      - **Largest Contentful Paint**: ${formatMetric(metrics.largestContentfulPaint, "ms")}
+      - **Total Blocking Time**: ${formatMetric(metrics.totalBlockingTime, "ms")}
+      - **Cumulative Layout Shift**: ${formatMetric(metrics.cumulativeLayoutShift, "")}
+      - **Speed Index**: ${formatMetric(metrics.speedIndex, "ms")}
+    `
+    : "";
+
+  return `
+    ## 🔍 Lighthouse Audit Results
+
+    ⏳ Rendering Lighthouse score...
+
+      ### Scores
+      - **Performance**: ${formatScore(performance)}
+      - **Accessibility**: ${formatScore(accessibility)}
+      - **Best Practices**: ${formatScore(bestPractices)}
+      - **SEO**: ${formatScore(seo)}
+
+      ${metricsSection}
+
+      *Audit completed automatically after theme deployment*
+  `;
 }
 
 /**
@@ -630,7 +813,7 @@ async function createOrUpdatePreviewTheme(
   let themeId: string;
   let themeUrl: string;
 
-  if (existingThemeId) { 
+  if (existingThemeId) {
     console.log(`[${owner}/${repo}] Updating existing preview theme ${existingThemeId}...`);
 
     themeId = existingThemeId;
@@ -697,7 +880,25 @@ async function createOrUpdatePreviewTheme(
     );
 
     await saveThemeIdToDescription(octokit, owner, repo, pr.number, themeId);
-    await commentPreviewThemeId(octokit, owner, repo, pr.number, themeId, storeName, "update");
+
+    // Wait 2 minutes for the theme to be fully deployed before running Lighthouse
+    console.log(`[${owner}/${repo}] Waiting 2 minutes for theme to be fully deployed...`);
+    await delay(2 * 60 * 1000); // 2 minutes
+
+    // Run Lighthouse audit on the preview theme
+    const previewUrl = `https://${storeName}.myshopify.com?preview_theme_id=${themeId}`;
+    const lighthouseResults = await runLighthouseAudit(owner, repo, previewUrl);
+
+    await commentPreviewThemeId(
+      octokit,
+      owner,
+      repo,
+      pr.number,
+      themeId,
+      storeName,
+      "update",
+      lighthouseResults || undefined
+    );
   } else {
     console.log(`[${owner}/${repo}] Creating new preview theme...`);
 
@@ -758,7 +959,25 @@ async function createOrUpdatePreviewTheme(
     console.log(`[${owner}/${repo}] Successfully created preview theme ${themeId}`);
 
     await saveThemeIdToDescription(octokit, owner, repo, pr.number, themeId);
-    await commentPreviewThemeId(octokit, owner, repo, pr.number, themeId, storeName, "create");
+
+    // Wait 2 minutes for the theme to be fully deployed before running Lighthouse
+    console.log(`[${owner}/${repo}] Waiting 2 minutes for theme to be fully deployed...`);
+    await delay(2 * 60 * 1000); // 2 minutes
+
+    // Run Lighthouse audit on the preview theme
+    const previewUrl = `https://${storeName}.myshopify.com?preview_theme_id=${themeId}`;
+    const lighthouseResults = await runLighthouseAudit(owner, repo, previewUrl);
+
+    await commentPreviewThemeId(
+      octokit,
+      owner,
+      repo,
+      pr.number,
+      themeId,
+      storeName,
+      "create",
+      lighthouseResults || undefined
+    );
   }
 
   // Clean up temporary directory
