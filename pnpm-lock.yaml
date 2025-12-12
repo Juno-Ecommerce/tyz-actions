@@ -47,6 +47,9 @@ importers:
       puppeteer-core:
         specifier: ^24.33.0
         version: 24.33.0
+      speedline-core:
+        specifier: ^1.4.3
+        version: 1.4.3
       tar:
         specifier: ^7.5.2
         version: 7.5.2

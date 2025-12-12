@@ -4,7 +4,7 @@
   "functions": {
     "api/**/*.ts": {
       "maxDuration": 60,
-      "includeFiles": "node_modules/**/{lighthouse,axe-core,http-link-header,js-library-detector,jpeg-js}/**"
+      "includeFiles": "node_modules/**/{lighthouse,axe-core,http-link-header,js-library-detector,jpeg-js,speedline-core}/**"
     }
   }
 }
