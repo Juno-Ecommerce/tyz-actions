@@ -376,7 +376,7 @@ async function commentPreviewThemeId(
 async function runLighthouseAudit(
   owner: string,
   repo: string,
-  previewUrl: string
+  url: string
 ): Promise<{
   performance: number;
   accessibility: number;
@@ -390,88 +390,56 @@ async function runLighthouseAudit(
     speedIndex?: number;
   };
 } | null> {
-  let chrome: any = null;
+  let browser: any = null;
 
   try {
-    console.log(
-      `[${owner}/${repo}] Starting Lighthouse audit for ${previewUrl}...`
-    );
+    console.log(`[${owner}/${repo}] Starting Lighthouse audit for ${url}...`);
 
-    // Set environment variables to prevent Lighthouse from loading assets during import
-    // These need to be set before importing Lighthouse
-    if (!process.env.LIGHTHOUSE_LOCALE) {
-      process.env.LIGHTHOUSE_LOCALE = "en";
-    }
+    const chromiumMod = await import("@sparticuz/chromium");
+    const puppeteerMod = await import("puppeteer-core");
+    const lighthouseMod = await import("lighthouse");
 
-    // Dynamically import to avoid loading assets/locales at module initialization
-    // This prevents ENOENT errors for missing files in serverless environments
-    let chromeLauncherModule;
-    let lighthouseModule;
+    const chromium = (chromiumMod as any).default ?? chromiumMod;
+    const puppeteer = (puppeteerMod as any).default ?? puppeteerMod;
+    const lighthouse = (lighthouseMod as any).default ?? lighthouseMod;
 
-    try {
-      chromeLauncherModule = await import("chrome-launcher");
-      lighthouseModule = await import("lighthouse");
-    } catch (importError: any) {
-      // If import fails due to missing assets, log and return null
-      console.error(
-        `[${owner}/${repo}] Failed to import Lighthouse modules:`,
-        importError.message
-      );
-      // Try to work around missing assets by using a minimal import
-      // Some serverless environments may not include all Lighthouse assets
-      if (importError.code === "ENOENT") {
-        console.error(
-          `[${owner}/${repo}] Lighthouse assets missing. Skipping audit.`
-        );
-        return null;
-      }
-      throw importError;
-    }
-
-    // Launch Chrome
-    chrome = await chromeLauncherModule.launch({
-      chromeFlags: ["--headless", "--no-sandbox", "--disable-gpu"],
+    // Launch Chromium compatible with serverless (Vercel/Lambda)
+    browser = await puppeteer.launch({
+      args: chromium.args,
+      defaultViewport: chromium.defaultViewport,
+      executablePath: await chromium.executablePath(),
+      headless: chromium.headless,
     });
 
-    const options = {
-      logLevel: "info" as const,
-      output: "json" as const,
+    // Lighthouse needs the debugging port
+    const wsEndpoint: string = browser.wsEndpoint();
+    const port = Number(new URL(wsEndpoint).port);
+
+    const runnerResult = await lighthouse(url, {
+      port,
+      logLevel: "info",
+      output: "json",
       onlyCategories: ["performance", "accessibility", "best-practices", "seo"],
-      port: chrome.port,
-      locale: "en" as const,
-    };
+      locale: "en",
+    });
 
-    // Lighthouse exports as default
-    const lighthouse = lighthouseModule.default || lighthouseModule;
-    const runnerResult = await lighthouse(previewUrl, options);
-
-    if (!runnerResult) {
+    if (!runnerResult?.lhr?.categories) {
       console.error(`[${owner}/${repo}] Lighthouse returned no results`);
       return null;
     }
 
-    const lhr = runnerResult.lhr;
-    const categories = lhr.categories;
+    const { categories, audits } = runnerResult.lhr;
 
     const performance = Math.round((categories.performance?.score || 0) * 100);
-    const accessibility = Math.round(
-      (categories.accessibility?.score || 0) * 100
-    );
-    const bestPractices = Math.round(
-      (categories["best-practices"]?.score || 0) * 100
-    );
+    const accessibility = Math.round((categories.accessibility?.score || 0) * 100);
+    const bestPractices = Math.round((categories["best-practices"]?.score || 0) * 100);
     const seo = Math.round((categories.seo?.score || 0) * 100);
 
-    // Extract key metrics
-    const metrics = lhr.audits;
-    const firstContentfulPaint =
-      metrics["first-contentful-paint"]?.numericValue;
-    const largestContentfulPaint =
-      metrics["largest-contentful-paint"]?.numericValue;
-    const totalBlockingTime = metrics["total-blocking-time"]?.numericValue;
-    const cumulativeLayoutShift =
-      metrics["cumulative-layout-shift"]?.numericValue;
-    const speedIndex = metrics["speed-index"]?.numericValue;
+    const firstContentfulPaint = audits["first-contentful-paint"]?.numericValue;
+    const largestContentfulPaint = audits["largest-contentful-paint"]?.numericValue;
+    const totalBlockingTime = audits["total-blocking-time"]?.numericValue;
+    const cumulativeLayoutShift = audits["cumulative-layout-shift"]?.numericValue;
+    const speedIndex = audits["speed-index"]?.numericValue;
 
     console.log(`[${owner}/${repo}] Lighthouse audit completed:
       Performance: ${performance}
@@ -493,14 +461,11 @@ async function runLighthouseAudit(
       },
     };
   } catch (error: any) {
-    console.error(
-      `[${owner}/${repo}] Error running Lighthouse audit:`,
-      error.message
-    );
+    console.error(`[${owner}/${repo}] Error running Lighthouse audit:`, error.message);
     return null;
   } finally {
-    if (chrome) {
-      await chrome.kill();
+    if (browser) {
+      await browser.close().catch(() => {});
     }
   }
 }
