@@ -33,34 +33,24 @@ function delay(ms: number): Promise<void> {
 }
 
 /**
- * Checks if a theme is ready by querying its status via GraphQL
+ * Checks if a theme is ready by querying its status via the public API
  */
 async function isThemeReady(
-  graphqlUrl: string,
-  adminApiToken: string,
-  themeId: string,
   storeName: string,
+  themeId: string,
   owner: string,
   repo: string
 ): Promise<boolean> {
   try {
-    const response = await fetch(graphqlUrl, {
+    const apiUrl = "https://tyz-actions-access.vercel.app/api/theme/status";
+    const response = await fetch(apiUrl, {
       method: "POST",
       headers: {
-        "X-Shopify-Access-Token": adminApiToken,
         "Content-Type": "application/json",
       },
       body: JSON.stringify({
-        query: `
-          query getThemeStatus($id: ID!) {
-            theme(id: $id) {
-              processing
-            }
-          }
-        `,
-        variables: {
-          id: `gid://shopify/OnlineStoreTheme/${themeId}`,
-        },
+        shop: `${storeName}.myshopify.com`,
+        themeId: themeId,
       }),
     });
 
@@ -69,20 +59,16 @@ async function isThemeReady(
     }
 
     const result = (await response.json()) as {
-      data?: {
-        theme: {
-          processing: boolean;
-        } | null;
-      };
-      errors?: { message: string }[];
+      processing: boolean | null;
+      error?: string;
     };
 
-    // If there are errors or theme is null, it's not ready
-    if (result.errors?.length || !result.data?.theme || result.data.theme.processing === true) {
+    // If there's an error or theme is still processing, it's not ready
+    if (result.error || result.processing === true) {
       return false;
     }
 
-    // Theme exists and is accessible via GraphQL
+    // If processing is false or null (and no error), theme should be ready
     // Also check if we can access the preview URL to confirm it's fully processed
     const previewUrl = `https://${storeName}.myshopify.com?preview_theme_id=${themeId}`;
 
@@ -94,8 +80,8 @@ async function isThemeReady(
       // If we get a 200 or redirect, the theme is likely ready
       return previewResponse.ok || previewResponse.status < 400;
     } catch {
-      // If preview check fails, assume theme is ready if GraphQL query succeeded
-      return true;
+      // If preview check fails, assume theme is ready if API query succeeded
+      return result.processing === false;
     }
   } catch (error: any) {
     console.error(
@@ -111,10 +97,8 @@ async function isThemeReady(
  * Returns true when ready, false if timeout is reached
  */
 async function waitForThemeReady(
-  graphqlUrl: string,
-  adminApiToken: string,
-  themeId: string,
   storeName: string,
+  themeId: string,
   owner: string,
   repo: string,
   maxWaitTime: number = 5 * 60 * 1000 // 5 minutes max
@@ -127,18 +111,13 @@ async function waitForThemeReady(
   );
 
   while (Date.now() - startTime < maxWaitTime) {
-    const isReady = await isThemeReady(
-      graphqlUrl,
-      adminApiToken,
-      themeId,
-      storeName,
-      owner,
-      repo
-    );
+    const isReady = await isThemeReady(storeName, themeId, owner, repo);
 
     if (isReady) {
       console.log(
-        `[${owner}/${repo}] Theme ${themeId} is ready after ${Math.round((Date.now() - startTime) / 1000)} seconds`
+        `[${owner}/${repo}] Theme ${themeId} is ready after ${Math.round(
+          (Date.now() - startTime) / 1000
+        )} seconds`
       );
       return true;
     }
@@ -148,7 +127,9 @@ async function waitForThemeReady(
   }
 
   console.warn(
-    `[${owner}/${repo}] Theme ${themeId} did not become ready within ${maxWaitTime / 1000} seconds`
+    `[${owner}/${repo}] Theme ${themeId} did not become ready within ${
+      maxWaitTime / 1000
+    } seconds`
   );
   return false;
 }
@@ -281,8 +262,8 @@ async function getExistingPreviewThemeId(
     const { data: pr } = await octokit.request(
       "GET /repos/{owner}/{repo}/pulls/{pull_number}",
       {
-      owner,
-      repo,
+        owner,
+        repo,
         pull_number: prNumber,
       }
     );
@@ -345,7 +326,9 @@ async function saveThemeIdToDescription(
     );
     // Also remove any old formats
     updatedBody = updatedBody.replace(/\[preview-theme-id:\d+\]/gi, "").trim();
-    updatedBody = updatedBody.replace(/Preview Theme ID:\s*\[?\d+\]?/gi, "").trim();
+    updatedBody = updatedBody
+      .replace(/Preview Theme ID:\s*\[?\d+\]?/gi, "")
+      .trim();
 
     // Add the Preview Theme ID with warnings and square brackets
     const themeIdSection = `
@@ -366,7 +349,9 @@ async function saveThemeIdToDescription(
       body: updatedBody,
     });
 
-    console.log(`[${owner}/${repo}] Saved theme ID ${themeId} to PR description`);
+    console.log(
+      `[${owner}/${repo}] Saved theme ID ${themeId} to PR description`
+    );
   } catch (error: any) {
     console.error(
       `[${owner}/${repo}] Error saving theme ID to PR description:`,
@@ -404,7 +389,7 @@ async function commentPreviewThemeId(
     ? formatLighthouseResults(lighthouseResults)
     : "\n\n⏳ Calculating Lighthouse score...";
 
-    const createBody = `
+  const createBody = `
       Preview theme successfully created!
       \n\n
       Theme URL: https://${storeName}.myshopify.com?preview_theme_id=${themeId}
@@ -418,7 +403,7 @@ async function commentPreviewThemeId(
       ${lighthouseSection}
     `;
 
-    const updateBody = `
+  const updateBody = `
       Preview theme successfully updated!
       \n\n
       Theme URL: https://${storeName}.myshopify.com?preview_theme_id=${themeId}
@@ -469,7 +454,9 @@ async function runLighthouseAudit(
   let chrome: any = null;
 
   try {
-    console.log(`[${owner}/${repo}] Starting Lighthouse audit for ${previewUrl}...`);
+    console.log(
+      `[${owner}/${repo}] Starting Lighthouse audit for ${previewUrl}...`
+    );
 
     // Set environment variables to prevent Lighthouse from loading assets during import
     // These need to be set before importing Lighthouse
@@ -528,16 +515,23 @@ async function runLighthouseAudit(
     const categories = lhr.categories;
 
     const performance = Math.round((categories.performance?.score || 0) * 100);
-    const accessibility = Math.round((categories.accessibility?.score || 0) * 100);
-    const bestPractices = Math.round((categories["best-practices"]?.score || 0) * 100);
+    const accessibility = Math.round(
+      (categories.accessibility?.score || 0) * 100
+    );
+    const bestPractices = Math.round(
+      (categories["best-practices"]?.score || 0) * 100
+    );
     const seo = Math.round((categories.seo?.score || 0) * 100);
 
     // Extract key metrics
     const metrics = lhr.audits;
-    const firstContentfulPaint = metrics["first-contentful-paint"]?.numericValue;
-    const largestContentfulPaint = metrics["largest-contentful-paint"]?.numericValue;
+    const firstContentfulPaint =
+      metrics["first-contentful-paint"]?.numericValue;
+    const largestContentfulPaint =
+      metrics["largest-contentful-paint"]?.numericValue;
     const totalBlockingTime = metrics["total-blocking-time"]?.numericValue;
-    const cumulativeLayoutShift = metrics["cumulative-layout-shift"]?.numericValue;
+    const cumulativeLayoutShift =
+      metrics["cumulative-layout-shift"]?.numericValue;
     const speedIndex = metrics["speed-index"]?.numericValue;
 
     console.log(`[${owner}/${repo}] Lighthouse audit completed:
@@ -560,7 +554,10 @@ async function runLighthouseAudit(
       },
     };
   } catch (error: any) {
-    console.error(`[${owner}/${repo}] Error running Lighthouse audit:`, error.message);
+    console.error(
+      `[${owner}/${repo}] Error running Lighthouse audit:`,
+      error.message
+    );
     return null;
   } finally {
     if (chrome) {
@@ -609,10 +606,22 @@ function formatLighthouseResults(results: {
   const metricsSection = metrics
     ? `
       ### Performance Metrics
-      - **First Contentful Paint**: ${formatMetric(metrics.firstContentfulPaint, "ms")}
-      - **Largest Contentful Paint**: ${formatMetric(metrics.largestContentfulPaint, "ms")}
-      - **Total Blocking Time**: ${formatMetric(metrics.totalBlockingTime, "ms")}
-      - **Cumulative Layout Shift**: ${formatMetric(metrics.cumulativeLayoutShift, "")}
+      - **First Contentful Paint**: ${formatMetric(
+        metrics.firstContentfulPaint,
+        "ms"
+      )}
+      - **Largest Contentful Paint**: ${formatMetric(
+        metrics.largestContentfulPaint,
+        "ms"
+      )}
+      - **Total Blocking Time**: ${formatMetric(
+        metrics.totalBlockingTime,
+        "ms"
+      )}
+      - **Cumulative Layout Shift**: ${formatMetric(
+        metrics.cumulativeLayoutShift,
+        ""
+      )}
       - **Speed Index**: ${formatMetric(metrics.speedIndex, "ms")}
     `
     : "";
@@ -797,161 +806,81 @@ async function createThemeArchive(
   });
 }
 
-type StagedUploadResponse = {
-  data?: {
-    stagedUploadsCreate: {
-      stagedTargets: {
-        resourceUrl: string;
-        url: string;
-        parameters?: Array<{ name: string; value: string }>;
-      }[];
-      userErrors: { field: string[]; message: string }[];
-    };
-  };
-  errors?: { message: string }[];
-};
+interface FileUploadResponse {
+  resourceUrl: string | null;
+  error?: string;
+}
 
 const getStagedTarget = async (
-  graphqlUrl: string,
-  adminApiToken: string,
+  storeName: string,
   owner: string,
   repo: string,
   archiveBuffer: Buffer
 ): Promise<string | null> => {
-  console.log(`[${owner}/${repo}] Creating staged upload...`);
+  console.log(`[${owner}/${repo}] Uploading file via public API...`);
 
-  const stagedUploadResponse = await fetch(graphqlUrl, {
+  // Convert buffer to base64
+  const base64Data = archiveBuffer.toString("base64");
+
+  // Call the public API endpoint
+  const apiUrl = "https://tyz-actions-access.vercel.app/api/file/upload";
+  const uploadResponse = await fetch(apiUrl, {
     method: "POST",
     headers: {
-      "X-Shopify-Access-Token": adminApiToken,
       "Content-Type": "application/json",
     },
     body: JSON.stringify({
-      query: `
-        mutation stagedUploadsCreate($input: [StagedUploadInput!]!) {
-          stagedUploadsCreate(input: $input) {
-            stagedTargets {
-              resourceUrl
-              url
-              parameters {
-                name
-                value
-              }
-            }
-            userErrors {
-              field
-              message
-            }
-          }
-        }
-      `,
-      variables: {
-        input: [
-          {
-            filename: `theme-${Date.now()}.zip`,
-            mimeType: "application/zip",
-            fileSize: archiveBuffer.length.toString(),
-            resource: "FILE",
-            httpMethod: "POST",
-          },
-        ],
-      },
+      shop: `${storeName}.myshopify.com`,
+      fileData: base64Data,
+      filename: `theme-${Date.now()}.zip`,
+      mimeType: "application/zip",
     }),
   });
 
-  if (!stagedUploadResponse.ok) {
-    const text = await stagedUploadResponse.text().catch(() => "");
+  if (!uploadResponse.ok) {
+    const text = await uploadResponse.text().catch(() => "");
     throw new Error(
-      `[${owner}/${repo}] stagedUploadsCreate failed: ${stagedUploadResponse.status} ${stagedUploadResponse.statusText} ${text}`
+      `[${owner}/${repo}] File upload API failed: ${uploadResponse.status} ${uploadResponse.statusText} ${text}`
     );
   }
 
-  const stagedUploadResult =
-    (await stagedUploadResponse.json()) as StagedUploadResponse;
+  const result = (await uploadResponse.json()) as FileUploadResponse;
 
-  console.log(
-    `[${owner}/${repo}] Staged upload result:`,
-    JSON.stringify(stagedUploadResult, null, 2)
-  );
-
-  if (stagedUploadResult.errors?.length) {
+  if (result.error) {
     throw new Error(
-      `Failed to create staged upload (top-level errors): ${JSON.stringify(
-        stagedUploadResult.errors
-      )}`
+      `[${owner}/${repo}] File upload API error: ${result.error}`
     );
   }
 
-  const stagedCreate = stagedUploadResult.data?.stagedUploadsCreate;
-  if (!stagedCreate) {
-    throw new Error("stagedUploadsCreate missing in response");
-  }
-
-  if (stagedCreate.userErrors.length > 0) {
-    throw new Error(
-      `Failed to create staged upload: ${JSON.stringify(
-        stagedCreate.userErrors
-      )}`
-    );
-  }
-
-  const stagedTarget = stagedCreate.stagedTargets[0];
-  if (!stagedTarget) {
-    console.error(`[${owner}/${repo}] Failed to get staged upload target`);
+  if (!result.resourceUrl) {
+    console.error(`[${owner}/${repo}] No resourceUrl returned from API`);
     return null;
   }
 
-  console.log(`[${owner}/${repo}] Uploading file to staged upload URL...`);
-
-  // Use FormData so we don't have to hand-roll multipart
-  const formData = new FormData();
-
-  for (const param of stagedTarget.parameters || []) {
-    formData.append(param.name, param.value);
-  }
-
-  // File MUST be the last field
-  const zipBlob = new Blob([archiveBuffer], { type: "application/zip" });
-  formData.append("file", zipBlob, "theme.zip");
-
-  const uploadResponse = await fetch(stagedTarget.url, {
-    method: "POST",
-    body: formData,
-  });
-
-  if (!uploadResponse.ok) {
-    const errorText = await uploadResponse.text().catch(() => "");
-    throw new Error(
-      `Failed to upload file to staged upload URL: ${uploadResponse.status} ${uploadResponse.statusText} - ${errorText}`
-    );
-  }
-
   console.log(
-    `[${owner}/${repo}] Successfully uploaded file to staged upload URL`
+    `[${owner}/${repo}] Successfully uploaded file and received resourceUrl`
   );
 
   // This URL is what we pass as originalSource to themeCreate
-  return stagedTarget.resourceUrl;
+  return result.resourceUrl;
 };
 
 /**
  * Uploads the theme files to the store and returns the resourceUrl
  */
 const handleFileUpload = async (
-  graphqlUrl: string,
+  storeName: string,
   owner: string,
   repo: string,
   themeFiles: Array<{ path: string; content: Buffer }>,
-  tempDir: string,
-  adminApiToken: string
+  tempDir: string
 ): Promise<string | null> => {
   const archivePath = `${tempDir}/theme.zip`;
   await createThemeArchive(owner, repo, themeFiles, archivePath, tempDir);
   const archiveBuffer = readFileSync(archivePath);
 
   const resourceUrl = await getStagedTarget(
-    graphqlUrl,
-    adminApiToken,
+    storeName,
     owner,
     repo,
     archiveBuffer
@@ -975,7 +904,6 @@ async function createOrUpdatePreviewTheme(
   existingThemeId: string | null,
   adminApiToken: string
 ): Promise<void> {
-  const graphqlUrl = `https://${storeName}.myshopify.com/admin/api/2025-10/graphql.json`;
   const tempDir = `/tmp/preview-${owner}-${repo}-${pr.number}-${Date.now()}`;
 
   await downloadAndExtractRepository(octokit, owner, repo, pr, tempDir);
@@ -983,64 +911,57 @@ async function createOrUpdatePreviewTheme(
   const themeFiles = getShopifyFiles(owner, repo, tempDir);
 
   const resourceUrl = await handleFileUpload(
-    graphqlUrl,
+    storeName,
     owner,
     repo,
     themeFiles,
-    tempDir,
-    adminApiToken
+    tempDir
   );
 
-  if (!resourceUrl) throw new Error("Failed to upload file and get resource URL");
+  if (!resourceUrl)
+    throw new Error("Failed to upload file and get resource URL");
 
-    let themeId: string;
-    let themeUrl: string;
+  let themeId: string;
+  let themeUrl: string;
 
   if (existingThemeId) {
-    console.log(`[${owner}/${repo}] Updating existing preview theme ${existingThemeId}...`);
+    console.log(
+      `[${owner}/${repo}] Updating existing preview theme ${existingThemeId}...`
+    );
 
     themeId = existingThemeId;
 
-    const updateResponse = await fetch(graphqlUrl, {
+    const themeName = `Tryzens/Preview - PR #${
+      pr.number
+    } (${formatDateDDMMYY()})`;
+    const apiUrl = "https://tyz-actions-access.vercel.app/api/theme/update";
+
+    const updateResponse = await fetch(apiUrl, {
       method: "POST",
       headers: {
-        "X-Shopify-Access-Token": adminApiToken,
         "Content-Type": "application/json",
       },
       body: JSON.stringify({
-        query: `
-           mutation themeUpdate($id: ID!, $input: OnlineStoreThemeInput!) {
-            themeUpdate(id: $id, input: $input) {
-              theme {
-                id
-                name
-              }
-              userErrors {
-                field
-                message
-              }
-            }
-          }
-        `,
-        variables: {
-          id: `gid://shopify/OnlineStoreTheme/${existingThemeId}`,
-          input: {
-            name: `Tryzens/Preview - PR #${pr.number} (${formatDateDDMMYY()})`,
-          },
-        },
+        shop: `${storeName}.myshopify.com`,
+        themeId: existingThemeId,
+        name: themeName,
       }),
     });
 
+    if (!updateResponse.ok) {
+      const text = await updateResponse.text().catch(() => "");
+      throw new Error(
+        `[${owner}/${repo}] Theme update API failed: ${updateResponse.status} ${updateResponse.statusText} ${text}`
+      );
+    }
+
     const updateResult = (await updateResponse.json()) as {
-      data: {
-        themeUpdate: {
-          theme: {
-            id: string;
-            name: string;
-          };
-          userErrors: { field: string[]; message: string }[];
-        };
+      theme?: {
+        id: string;
+        name: string;
       };
+      userErrors?: Array<{ field: string[]; message: string }>;
+      error?: string;
     };
 
     console.log(
@@ -1048,14 +969,21 @@ async function createOrUpdatePreviewTheme(
       JSON.stringify(updateResult, null, 2)
     );
 
-    if (updateResult.data.themeUpdate.userErrors.length > 0) {
-      const errors = updateResult.data.themeUpdate.userErrors;
+    if (updateResult.error) {
+      throw new Error(
+        `[${owner}/${repo}] Failed to update theme: ${updateResult.error}`
+      );
+    }
+
+    if (updateResult.userErrors && updateResult.userErrors.length > 0) {
+      const errors = updateResult.userErrors;
       throw new Error(`Failed to update theme: ${JSON.stringify(errors)}`);
     }
 
-    const themeGid = updateResult.data.themeUpdate.theme.id;
-    if (!themeGid) throw new Error("Failed to get theme ID from update response");
-    themeId = themeGid.split("/").pop() || "";
+    if (updateResult.theme && updateResult.theme.id) {
+      const themeGid = updateResult.theme.id;
+      themeId = themeGid.split("/").pop() || existingThemeId;
+    }
 
     themeUrl = `https://${storeName}.myshopify.com/admin/themes/${themeId}`;
     console.log(
@@ -1065,14 +993,7 @@ async function createOrUpdatePreviewTheme(
     await saveThemeIdToDescription(octokit, owner, repo, pr.number, themeId);
 
     // Poll theme status every 5 seconds until it's ready
-    await waitForThemeReady(
-      graphqlUrl,
-      adminApiToken,
-      themeId,
-      storeName,
-      owner,
-      repo
-    );
+    await waitForThemeReady(storeName, themeId, owner, repo);
 
     // Run Lighthouse audit on the preview theme
     const previewUrl = `https://${storeName}.myshopify.com?preview_theme_id=${themeId}`;
@@ -1088,76 +1009,74 @@ async function createOrUpdatePreviewTheme(
       "update",
       lighthouseResults || undefined
     );
-    } else {
-      console.log(`[${owner}/${repo}] Creating new preview theme...`);
+  } else {
+    console.log(`[${owner}/${repo}] Creating new preview theme...`);
 
-    const createResponse = await fetch(graphqlUrl, {
+    const themeName = `Tryzens/Preview - PR #${
+      pr.number
+    } (${formatDateDDMMYY()})`;
+    const apiUrl = "https://tyz-actions-access.vercel.app/api/theme/create";
+
+    const createResponse = await fetch(apiUrl, {
       method: "POST",
       headers: {
-        "X-Shopify-Access-Token": adminApiToken,
         "Content-Type": "application/json",
       },
       body: JSON.stringify({
-        query: `
-           mutation themeCreate($source: URL!, $name: String!) {
-            themeCreate(source: $source, name: $name) {
-              theme {
-                name
-                id
-              }
-              userErrors {
-                field
-                message
-              }
-            }
-          }
-        `,
-        variables: {
-          name: `Tryzens/Preview - PR #${pr.number} (${formatDateDDMMYY()})`,
-          source: resourceUrl,
-        },
+        shop: `${storeName}.myshopify.com`,
+        source: resourceUrl,
+        name: themeName,
       }),
     });
 
+    if (!createResponse.ok) {
+      const text = await createResponse.text().catch(() => "");
+      throw new Error(
+        `[${owner}/${repo}] Theme create API failed: ${createResponse.status} ${createResponse.statusText} ${text}`
+      );
+    }
+
     const createResult = (await createResponse.json()) as {
-      data: {
-        themeCreate: {
-          theme: {
-            id: string;
-            name: string;
-          };
-          userErrors: Array<{ field: string[]; message: string }>;
-        };
+      theme?: {
+        id: string;
+        name: string;
       };
+      userErrors?: Array<{ field: string[]; message: string }>;
+      error?: string;
     };
 
-    console.log(`[${owner}/${repo}] Create result:`, JSON.stringify(createResult, null, 2));
+    console.log(
+      `[${owner}/${repo}] Create result:`,
+      JSON.stringify(createResult, null, 2)
+    );
 
-    if (createResult.data.themeCreate.userErrors.length > 0) {
-      const errors = createResult.data.themeCreate.userErrors;
+    if (createResult.error) {
+      throw new Error(
+        `[${owner}/${repo}] Failed to create theme: ${createResult.error}`
+      );
+    }
+
+    if (createResult.userErrors && createResult.userErrors.length > 0) {
+      const errors = createResult.userErrors;
       throw new Error(`Failed to create theme: ${JSON.stringify(errors)}`);
     }
 
-    const themeGid = createResult.data.themeCreate.theme.id;
-    if (!themeGid) {
+    if (!createResult.theme || !createResult.theme.id) {
       throw new Error("Failed to get theme ID from create response");
     }
+
+    const themeGid = createResult.theme.id;
     themeId = themeGid.split("/").pop() || "";
 
     themeUrl = `https://${storeName}.myshopify.com/admin/themes/${themeId}`;
-    console.log(`[${owner}/${repo}] Successfully created preview theme ${themeId}`);
+    console.log(
+      `[${owner}/${repo}] Successfully created preview theme ${themeId}`
+    );
 
     await saveThemeIdToDescription(octokit, owner, repo, pr.number, themeId);
 
     // Poll theme status every 5 seconds until it's ready
-    await waitForThemeReady(
-      graphqlUrl,
-      adminApiToken,
-      themeId,
-      storeName,
-      owner,
-      repo
-    );
+    await waitForThemeReady(storeName, themeId, owner, repo);
 
     // Run Lighthouse audit on the preview theme
     const previewUrl = `https://${storeName}.myshopify.com?preview_theme_id=${themeId}`;
@@ -1206,13 +1125,17 @@ export async function deletePreviewTheme(
       pr
     );
     if (!storeName) {
-      console.log(`[${owner}/${repo}] No store name found, skipping theme deletion`);
+      console.log(
+        `[${owner}/${repo}] No store name found, skipping theme deletion`
+      );
       return;
     }
 
     const adminApiToken = await getAdminApiToken(octokit, pr, owner, repo);
     if (!adminApiToken) {
-      console.log(`[${owner}/${repo}] No admin API token found, skipping theme deletion`);
+      console.log(
+        `[${owner}/${repo}] No admin API token found, skipping theme deletion`
+      );
       return;
     }
 
@@ -1224,13 +1147,17 @@ export async function deletePreviewTheme(
     );
 
     if (!existingThemeId) {
-      console.log(`[${owner}/${repo}] No preview theme ID found in PR description, skipping deletion`);
+      console.log(
+        `[${owner}/${repo}] No preview theme ID found in PR description, skipping deletion`
+      );
       return;
     }
 
     const graphqlUrl = `https://${storeName}.myshopify.com/admin/api/2025-10/graphql.json`;
 
-    console.log(`[${owner}/${repo}] Deleting preview theme ${existingThemeId}...`);
+    console.log(
+      `[${owner}/${repo}] Deleting preview theme ${existingThemeId}...`
+    );
 
     const deleteResponse = await fetch(graphqlUrl, {
       method: "POST",
@@ -1273,10 +1200,17 @@ export async function deletePreviewTheme(
       errors?: { message: string }[];
     };
 
-    console.log(`[${owner}/${repo}] Delete result:`, JSON.stringify(deleteResult, null, 2));
+    console.log(
+      `[${owner}/${repo}] Delete result:`,
+      JSON.stringify(deleteResult, null, 2)
+    );
 
     if (deleteResult.errors?.length) {
-      throw new Error(`Failed to delete theme (top-level errors): ${JSON.stringify(deleteResult.errors)}`);
+      throw new Error(
+        `Failed to delete theme (top-level errors): ${JSON.stringify(
+          deleteResult.errors
+        )}`
+      );
     }
 
     const themeDelete = deleteResult.data?.themeDelete;
@@ -1289,7 +1223,9 @@ export async function deletePreviewTheme(
       throw new Error(`Failed to delete theme: ${JSON.stringify(errors)}`);
     }
 
-    console.log(`[${owner}/${repo}] Successfully deleted preview theme ${existingThemeId}`);
+    console.log(
+      `[${owner}/${repo}] Successfully deleted preview theme ${existingThemeId}`
+    );
 
     // Comment on PR about successful deletion
     await octokit.request(
@@ -1342,8 +1278,8 @@ export async function handlePreviewTheme(
 
     const existingThemeId = await getExistingPreviewThemeId(
       octokit,
-        owner,
-        repo,
+      owner,
+      repo,
       pr.number
     );
 
@@ -1357,7 +1293,10 @@ export async function handlePreviewTheme(
       adminApiToken
     );
   } catch (error: any) {
-    console.error(`[${owner}/${repo}] Error handling preview generation, please contact a senior developer.`, error.message);
+    console.error(
+      `[${owner}/${repo}] Error handling preview generation, please contact a senior developer.`,
+      error.message
+    );
 
     await octokit.request(
       "POST /repos/{owner}/{repo}/issues/{issue_number}/comments",
@@ -1366,7 +1305,7 @@ export async function handlePreviewTheme(
         repo,
         issue_number: pr.number,
         body: `❌ Error creating preview theme: ${error.message}`,
-    }
+      }
     );
   }
 }
