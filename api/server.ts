@@ -4,10 +4,10 @@ import invariant from "tiny-invariant";
 import { createHmac, timingSafeEqual } from "node:crypto";
 import { IncomingMessage, ServerResponse } from "node:http";
 
-import { updateParentOnSGCPush } from "./processes/update-parent-on-sgc-push.js";
-import { updateStagingOnProductionPush } from "./processes/update-staging-on-production-push.js";
-import { updateSGCOnParentPush } from "./processes/update-sgc-on-parent-push.js";
-import { handlePreviewTheme, deletePreviewTheme } from "./processes/handle-preview-theme.js";
+import { updateParentOnSGCPush } from "../processes/update-parent-on-sgc-push.js";
+import { updateStagingOnProductionPush } from "../processes/update-staging-on-production-push.js";
+import { updateSGCOnParentPush } from "../processes/update-sgc-on-parent-push.js";
+import { handlePreviewTheme, deletePreviewTheme } from "../processes/handle-preview-theme.js";
 
 const { APP_ID, PRIVATE_KEY, WEBHOOK_SECRET } = process.env;
 invariant(APP_ID, "APP_ID required");
