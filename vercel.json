@@ -1,9 +1,8 @@
 {
   "version": 2,
-  "builds": [{ "src": "server.ts", "use": "@vercel/node" }],
-  "routes": [{ "src": "/(.*)", "dest": "/server.ts" }],
+  "routes": [{ "src": "/(.*)", "dest": "/api/server" }],
   "functions": {
-    "server.ts": {
+    "api/**/*.ts": {
       "includeFiles": "node_modules/**/lighthouse/**"
     }
   }
