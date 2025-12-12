@@ -13,6 +13,7 @@
     "@shopify/cli": "^3.87.4",
     "@sparticuz/chromium": "^143.0.0",
     "archiver": "^7.0.1",
+    "axe-core": "^4.11.0",
     "lighthouse": "^13.0.1",
     "puppeteer-core": "^24.33.0",
     "tar": "^7.5.2",

@@ -29,6 +29,9 @@ importers:
       archiver:
         specifier: ^7.0.1
         version: 7.0.1
+      axe-core:
+        specifier: ^4.11.0
+        version: 4.11.0
       lighthouse:
         specifier: ^13.0.1
         version: 13.0.1

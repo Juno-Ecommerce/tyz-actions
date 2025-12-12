@@ -3,7 +3,7 @@
   "routes": [{ "src": "/(.*)", "dest": "/api/server" }],
   "functions": {
     "api/**/*.ts": {
-      "includeFiles": "node_modules/**/lighthouse/**"
+      "includeFiles": "node_modules/**/{lighthouse,axe-core}/**"
     }
   }
 }
