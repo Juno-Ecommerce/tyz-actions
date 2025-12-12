@@ -996,12 +996,12 @@ async function createOrUpdatePreviewTheme(
     let themeId: string;
     let themeUrl: string;
 
-    if (existingThemeId) {
-      console.log(`[${owner}/${repo}] Updating existing preview theme ${existingThemeId}...`);
+  if (existingThemeId) {
+    console.log(`[${owner}/${repo}] Updating existing preview theme ${existingThemeId}...`);
 
     themeId = existingThemeId;
 
-    const createResponse = await fetch(graphqlUrl, {
+    const updateResponse = await fetch(graphqlUrl, {
       method: "POST",
       headers: {
         "X-Shopify-Access-Token": adminApiToken,
@@ -1031,7 +1031,7 @@ async function createOrUpdatePreviewTheme(
       }),
     });
 
-    const updateResult = (await createResponse.json()) as {
+    const updateResult = (await updateResponse.json()) as {
       data: {
         themeUpdate: {
           theme: {
