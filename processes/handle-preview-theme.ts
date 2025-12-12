@@ -819,19 +819,63 @@ export async function deletePreviewTheme(
       return;
     }
 
-    // TODO: Implement theme deletion via public API endpoint when available
     console.log(
-      `[${owner}/${repo}] Theme deletion not yet implemented via public API. Theme ${existingThemeId} should be deleted manually.`
+      `[${owner}/${repo}] Deleting preview theme ${existingThemeId}...`
     );
 
-    // Comment on PR about deletion
+    const apiUrl = "https://tyz-actions-access.vercel.app/api/theme/delete";
+    const deleteResponse = await fetch(apiUrl, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        shop: `${storeName}.myshopify.com`,
+        themeId: existingThemeId,
+      }),
+    });
+
+    if (!deleteResponse.ok) {
+      const text = await deleteResponse.text().catch(() => "");
+      throw new Error(
+        `[${owner}/${repo}] Theme delete API failed: ${deleteResponse.status} ${deleteResponse.statusText} ${text}`
+      );
+    }
+
+    const deleteResult = (await deleteResponse.json()) as {
+      deletedThemeId?: string;
+      userErrors?: Array<{ field: string[]; message: string }>;
+      error?: string;
+    };
+
+    console.log(
+      `[${owner}/${repo}] Delete result:`,
+      JSON.stringify(deleteResult, null, 2)
+    );
+
+    if (deleteResult.error) {
+      throw new Error(
+        `[${owner}/${repo}] Failed to delete theme: ${deleteResult.error}`
+      );
+    }
+
+    if (deleteResult.userErrors && deleteResult.userErrors.length > 0) {
+      const errors = deleteResult.userErrors;
+      throw new Error(`Failed to delete theme: ${JSON.stringify(errors)}`);
+    }
+
+    console.log(
+      `[${owner}/${repo}] Successfully deleted preview theme ${existingThemeId}`
+    );
+
+    // Comment on PR about successful deletion
     await octokit.request(
       "POST /repos/{owner}/{repo}/issues/{issue_number}/comments",
       {
         owner,
         repo,
         issue_number: pr.number,
-        body: `⚠️ Theme deletion is not yet available via the public API. Please delete preview theme ${existingThemeId} manually if needed.`,
+        body: `✅ Preview theme ${existingThemeId} has been successfully deleted.`,
       }
     );
   } catch (error: any) {
