@@ -4,7 +4,7 @@
   "routes": [{ "src": "/(.*)", "dest": "/server.ts" }],
   "functions": {
     "server.ts": {
-      "includeFiles": ["node_modules/lighthouse/**"]
+      "includeFiles": "node_modules/**/lighthouse/**"
     }
   }
 }
