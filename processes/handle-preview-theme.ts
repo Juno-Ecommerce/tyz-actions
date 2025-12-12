@@ -188,67 +188,6 @@ async function extractStoreNameFromHomepage(
 }
 
 /**
- * Gets the Admin API token for the store from GitHub repository variables.
- * This should be set as a repository variable called TYZ_ACTIONS_ACCESS_KEY.
- * The token should be a Custom App on each store with Admin API Access for read_themes and write_themes scopes.
- * @returns The Admin API token for the store
- */
-const getAdminApiToken = async (
-  octokit: Octokit,
-  pr: PullRequest,
-  owner: string,
-  repo: string
-): Promise<string | undefined> => {
-  try {
-    // Fetch the repository variable TYZ_ACTIONS_ACCESS_KEY
-    const { data: variable } = await octokit.request(
-      "GET /repos/{owner}/{repo}/actions/variables/{name}",
-      {
-        owner,
-        repo,
-        name: "TYZ_ACTIONS_ACCESS_KEY",
-      }
-    );
-
-    if (variable.value) {
-      return variable.value;
-    }
-  } catch (error: any) {
-    console.error(
-      `[${owner}/${repo}] Failed to fetch TYZ_ACTIONS_ACCESS_KEY repository variable:`,
-      error.message
-    );
-
-    // Check if it's a 404 (variable doesn't exist) or other error
-    if (error.status === 404) {
-      await octokit.request(
-        "POST /repos/{owner}/{repo}/issues/{issue_number}/comments",
-        {
-          owner,
-          repo,
-          issue_number: pr.number,
-          body: "❌ TYZ_ACTIONS_ACCESS_KEY repository variable is not set. Please add this variable in your repository settings (Settings > Secrets and variables > Actions > Variables). This should be a store-specific Admin API access token.",
-        }
-      );
-    } else {
-      await octokit.request(
-        "POST /repos/{owner}/{repo}/issues/{issue_number}/comments",
-        {
-          owner,
-          repo,
-          issue_number: pr.number,
-          body: `❌ Error fetching TYZ_ACTIONS_ACCESS_KEY repository variable: ${error.message}. Please ensure the variable exists and the app has the necessary permissions.`,
-        }
-      );
-    }
-
-    return undefined;
-  }
-
-  return undefined;
-};
-
-/**
  * Checks PR description for an existing preview theme ID
  * Looks for pattern: "[preview-theme-id:<id>]" in the PR body
  */
@@ -262,8 +201,8 @@ async function getExistingPreviewThemeId(
     const { data: pr } = await octokit.request(
       "GET /repos/{owner}/{repo}/pulls/{pull_number}",
       {
-        owner,
-        repo,
+      owner,
+      repo,
         pull_number: prNumber,
       }
     );
@@ -417,9 +356,9 @@ async function commentPreviewThemeId(
     await octokit.request(
       "POST /repos/{owner}/{repo}/issues/{issue_number}/comments",
       {
-        owner,
-        repo,
-        issue_number: prNumber,
+      owner,
+      repo,
+      issue_number: prNumber,
         body: method === "create" ? createBody : updateBody,
       }
     );
@@ -817,7 +756,7 @@ const getStagedTarget = async (
   repo: string,
   archiveBuffer: Buffer
 ): Promise<string | null> => {
-  console.log(`[${owner}/${repo}] Uploading file via public API...`);
+  console.log(`[${owner}/${repo}] Uploading file to ${storeName} via public API...`);
 
   // Convert buffer to base64
   const base64Data = archiveBuffer.toString("base64");
@@ -901,8 +840,7 @@ async function createOrUpdatePreviewTheme(
   repo: string,
   pr: PullRequest,
   storeName: string,
-  existingThemeId: string | null,
-  adminApiToken: string
+  existingThemeId: string | null
 ): Promise<void> {
   const tempDir = `/tmp/preview-${owner}-${repo}-${pr.number}-${Date.now()}`;
 
@@ -921,15 +859,15 @@ async function createOrUpdatePreviewTheme(
   if (!resourceUrl)
     throw new Error("Failed to upload file and get resource URL");
 
-  let themeId: string;
-  let themeUrl: string;
+    let themeId: string;
+    let themeUrl: string;
 
-  if (existingThemeId) {
+    if (existingThemeId) {
     console.log(
       `[${owner}/${repo}] Updating existing preview theme ${existingThemeId}...`
-    );
-
-    themeId = existingThemeId;
+      );
+      
+      themeId = existingThemeId;
 
     const themeName = `Tryzens/Preview - PR #${
       pr.number
@@ -1009,8 +947,8 @@ async function createOrUpdatePreviewTheme(
       "update",
       lighthouseResults || undefined
     );
-  } else {
-    console.log(`[${owner}/${repo}] Creating new preview theme...`);
+    } else {
+      console.log(`[${owner}/${repo}] Creating new preview theme...`);
 
     const themeName = `Tryzens/Preview - PR #${
       pr.number
@@ -1131,14 +1069,6 @@ export async function deletePreviewTheme(
       return;
     }
 
-    const adminApiToken = await getAdminApiToken(octokit, pr, owner, repo);
-    if (!adminApiToken) {
-      console.log(
-        `[${owner}/${repo}] No admin API token found, skipping theme deletion`
-      );
-      return;
-    }
-
     const existingThemeId = await getExistingPreviewThemeId(
       octokit,
       owner,
@@ -1153,88 +1083,19 @@ export async function deletePreviewTheme(
       return;
     }
 
-    const graphqlUrl = `https://${storeName}.myshopify.com/admin/api/2025-10/graphql.json`;
-
+    // TODO: Implement theme deletion via public API endpoint when available
     console.log(
-      `[${owner}/${repo}] Deleting preview theme ${existingThemeId}...`
+      `[${owner}/${repo}] Theme deletion not yet implemented via public API. Theme ${existingThemeId} should be deleted manually.`
     );
 
-    const deleteResponse = await fetch(graphqlUrl, {
-      method: "POST",
-      headers: {
-        "X-Shopify-Access-Token": adminApiToken,
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify({
-        query: `
-          mutation themeDelete($id: ID!) {
-            themeDelete(id: $id) {
-              deletedThemeId
-              userErrors {
-                field
-                message
-              }
-            }
-          }
-        `,
-        variables: {
-          id: `gid://shopify/OnlineStoreTheme/${existingThemeId}`,
-        },
-      }),
-    });
-
-    if (!deleteResponse.ok) {
-      const text = await deleteResponse.text();
-      throw new Error(
-        `themeDelete failed: ${deleteResponse.status} ${deleteResponse.statusText} ${text}`
-      );
-    }
-
-    const deleteResult = (await deleteResponse.json()) as {
-      data?: {
-        themeDelete: {
-          deletedThemeId: string | null;
-          userErrors: { field: string[]; message: string }[];
-        };
-      };
-      errors?: { message: string }[];
-    };
-
-    console.log(
-      `[${owner}/${repo}] Delete result:`,
-      JSON.stringify(deleteResult, null, 2)
-    );
-
-    if (deleteResult.errors?.length) {
-      throw new Error(
-        `Failed to delete theme (top-level errors): ${JSON.stringify(
-          deleteResult.errors
-        )}`
-      );
-    }
-
-    const themeDelete = deleteResult.data?.themeDelete;
-    if (!themeDelete) {
-      throw new Error("themeDelete missing in response");
-    }
-
-    if (themeDelete.userErrors.length > 0) {
-      const errors = themeDelete.userErrors;
-      throw new Error(`Failed to delete theme: ${JSON.stringify(errors)}`);
-    }
-
-    console.log(
-      `[${owner}/${repo}] Successfully deleted preview theme ${existingThemeId}`
-    );
-
-    // Comment on PR about successful deletion
+    // Comment on PR about deletion
     await octokit.request(
       "POST /repos/{owner}/{repo}/issues/{issue_number}/comments",
       {
         owner,
         repo,
         issue_number: pr.number,
-        body: `✅ Preview theme ${existingThemeId} has been deleted successfully.`,
+        body: `⚠️ Theme deletion is not yet available via the public API. Please delete preview theme ${existingThemeId} manually if needed.`,
       }
     );
   } catch (error: any) {
@@ -1273,9 +1134,6 @@ export async function handlePreviewTheme(
     );
     if (!storeName) return;
 
-    const adminApiToken = await getAdminApiToken(octokit, pr, owner, repo);
-    if (!adminApiToken) return;
-
     const existingThemeId = await getExistingPreviewThemeId(
       octokit,
       owner,
@@ -1289,8 +1147,7 @@ export async function handlePreviewTheme(
       repo,
       pr,
       storeName,
-      existingThemeId,
-      adminApiToken
+      existingThemeId
     );
   } catch (error: any) {
     console.error(
@@ -1305,7 +1162,7 @@ export async function handlePreviewTheme(
         repo,
         issue_number: pr.number,
         body: `❌ Error creating preview theme: ${error.message}`,
-      }
+    }
     );
   }
 }
