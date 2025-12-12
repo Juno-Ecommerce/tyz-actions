@@ -9,10 +9,10 @@ import {
 } from "node:fs";
 import { join } from "node:path";
 import { createRequire } from "node:module";
-import * as tar from "tar";
 
 const require = createRequire(import.meta.url);
 const archiver = require("archiver");
+const tar = require("tar");
 
 /**
  * Formats the current date as DD/MM/YY
@@ -295,7 +295,7 @@ async function saveThemeIdToDescription(
 }
 
 /**
- * Creates a comment on the PR with the preview theme ID and optional Lighthouse results
+ * Creates a comment on the PR with the preview theme ID
  */
 async function commentPreviewThemeId(
   octokit: Octokit,
@@ -304,28 +304,11 @@ async function commentPreviewThemeId(
   prNumber: number,
   themeId: string,
   storeName: string,
-  method: "create" | "update",
-  lighthouseResults?: {
-    performance: number;
-    accessibility: number;
-    bestPractices: number;
-    seo: number;
-    metrics?: {
-      firstContentfulPaint?: number;
-      largestContentfulPaint?: number;
-      totalBlockingTime?: number;
-      cumulativeLayoutShift?: number;
-      speedIndex?: number;
-    };
-  }
+  method: "create" | "update"
 ): Promise<void> {
-  const lighthouseSection = lighthouseResults
-    ? formatLighthouseResults(lighthouseResults)
-    : "\n\n⏳ Calculating Lighthouse score...";
+  const createBody = "Preview theme successfully created!\n\nTheme URL: https://" + storeName + ".myshopify.com?preview_theme_id=" + themeId + "\nCustomiser URL: https://" + storeName + ".myshopify.com/admin/themes/" + themeId + "/editor\nCode URL: https://" + storeName + ".myshopify.com/admin/themes/" + themeId + "\n\nThis theme will be updated automatically when you push changes to this PR.\n\nThe theme ID has been saved into the PR description. Please only remove this id from your PR description if you want to create a new preview theme.";
 
-  const createBody = "Preview theme successfully created!\n\nTheme URL: https://" + storeName + ".myshopify.com?preview_theme_id=" + themeId + "\nCustomiser URL: https://" + storeName + ".myshopify.com/admin/themes/" + themeId + "/editor\nCode URL: https://" + storeName + ".myshopify.com/admin/themes/" + themeId + "\n\nThis theme will be updated automatically when you push changes to this PR.\n\nThe theme ID has been saved into the PR description. Please only remove this id from your PR description if you want to create a new preview theme.\n\n" + lighthouseSection;
-
-  const updateBody = "Preview theme successfully updated!\n\nTheme URL: https://" + storeName + ".myshopify.com?preview_theme_id=" + themeId + "\nCustomiser URL: https://" + storeName + ".myshopify.com/admin/themes/" + themeId + "/editor\nCode URL: https://" + storeName + ".myshopify.com/admin/themes/" + themeId + "\n\n" + lighthouseSection;
+  const updateBody = "Preview theme successfully updated!\n\nTheme URL: https://" + storeName + ".myshopify.com?preview_theme_id=" + themeId + "\nCustomiser URL: https://" + storeName + ".myshopify.com/admin/themes/" + themeId + "/editor\nCode URL: https://" + storeName + ".myshopify.com/admin/themes/" + themeId;
 
   try {
     await octokit.request(
@@ -343,150 +326,6 @@ async function commentPreviewThemeId(
       error.message
     );
   }
-}
-
-/**
- * Runs a Lighthouse audit on the preview theme URL
- */
-async function runLighthouseAudit(
-  owner: string,
-  repo: string,
-  url: string
-): Promise<{
-  performance: number;
-  accessibility: number;
-  bestPractices: number;
-  seo: number;
-  metrics?: {
-    firstContentfulPaint?: number;
-    largestContentfulPaint?: number;
-    totalBlockingTime?: number;
-    cumulativeLayoutShift?: number;
-    speedIndex?: number;
-  };
-} | null> {
-  let browser: any = null;
-
-  try {
-    console.log(`[${owner}/${repo}] Starting Lighthouse audit for ${url}...`);
-
-    const chromiumMod = await import("@sparticuz/chromium");
-    const puppeteerMod = await import("puppeteer-core");
-    const lighthouseMod = await import("lighthouse");
-
-    const chromium = (chromiumMod as any).default ?? chromiumMod;
-    const puppeteer = (puppeteerMod as any).default ?? puppeteerMod;
-    const lighthouse = (lighthouseMod as any).default ?? lighthouseMod;
-
-    // Launch Chromium compatible with serverless (Vercel/Lambda)
-    browser = await puppeteer.launch({
-      args: chromium.args,
-      defaultViewport: chromium.defaultViewport,
-      executablePath: await chromium.executablePath(),
-      headless: chromium.headless,
-    });
-
-    // Lighthouse needs the debugging port
-    const wsEndpoint: string = browser.wsEndpoint();
-    const port = Number(new URL(wsEndpoint).port);
-
-    const runnerResult = await lighthouse(url, {
-      port,
-      logLevel: "info",
-      output: "json",
-      onlyCategories: ["performance", "accessibility", "best-practices", "seo"],
-      locale: "en",
-    });
-
-    if (!runnerResult?.lhr?.categories) {
-      console.error(`[${owner}/${repo}] Lighthouse returned no results`);
-      return null;
-    }
-
-    const { categories, audits } = runnerResult.lhr;
-
-    const performance = Math.round((categories.performance?.score || 0) * 100);
-    const accessibility = Math.round((categories.accessibility?.score || 0) * 100);
-    const bestPractices = Math.round((categories["best-practices"]?.score || 0) * 100);
-    const seo = Math.round((categories.seo?.score || 0) * 100);
-
-    const firstContentfulPaint = audits["first-contentful-paint"]?.numericValue;
-    const largestContentfulPaint = audits["largest-contentful-paint"]?.numericValue;
-    const totalBlockingTime = audits["total-blocking-time"]?.numericValue;
-    const cumulativeLayoutShift = audits["cumulative-layout-shift"]?.numericValue;
-    const speedIndex = audits["speed-index"]?.numericValue;
-
-    console.log(`[${owner}/${repo}] Lighthouse audit completed:
-      Performance: ${performance}
-      Accessibility: ${accessibility}
-      Best Practices: ${bestPractices}
-      SEO: ${seo}`);
-
-    return {
-      performance,
-      accessibility,
-      bestPractices,
-      seo,
-      metrics: {
-        firstContentfulPaint,
-        largestContentfulPaint,
-        totalBlockingTime,
-        cumulativeLayoutShift,
-        speedIndex,
-      },
-    };
-  } catch (error: any) {
-    console.error(`[${owner}/${repo}] Error running Lighthouse audit:`, error.message);
-    return null;
-  } finally {
-    if (browser) {
-      await browser.close().catch(() => {});
-    }
-  }
-}
-
-/**
- * Formats Lighthouse scores with emoji indicators
- */
-function formatScore(score: number): string {
-  if (score >= 90) return `🟢 ${score}`;
-  if (score >= 50) return `🟡 ${score}`;
-  return `🔴 ${score}`;
-}
-
-/**
- * Formats a metric value with appropriate units
- */
-function formatMetric(value: number | undefined, unit: string): string {
-  if (value === undefined) return "N/A";
-  if (unit === "ms") return `${Math.round(value)}ms`;
-  if (unit === "s") return `${(value / 1000).toFixed(2)}s`;
-  return `${value.toFixed(2)}`;
-}
-
-/**
- * Formats Lighthouse results as markdown
- */
-function formatLighthouseResults(results: {
-  performance: number;
-  accessibility: number;
-  bestPractices: number;
-  seo: number;
-  metrics?: {
-    firstContentfulPaint?: number;
-    largestContentfulPaint?: number;
-    totalBlockingTime?: number;
-    cumulativeLayoutShift?: number;
-    speedIndex?: number;
-  };
-}): string {
-  const { performance, accessibility, bestPractices, seo, metrics } = results;
-
-  const metricsSection = metrics
-    ? "\n### Performance Metrics\n- **First Contentful Paint**: " + formatMetric(metrics.firstContentfulPaint, "ms") + "\n- **Largest Contentful Paint**: " + formatMetric(metrics.largestContentfulPaint, "ms") + "\n- **Total Blocking Time**: " + formatMetric(metrics.totalBlockingTime, "ms") + "\n- **Cumulative Layout Shift**: " + formatMetric(metrics.cumulativeLayoutShift, "") + "\n- **Speed Index**: " + formatMetric(metrics.speedIndex, "ms") + "\n"
-    : "";
-
-  return "## 🔍 Lighthouse Audit Results\n\n⏳ Rendering Lighthouse score...\n\n### Scores\n- **Performance**: " + formatScore(performance) + "\n- **Accessibility**: " + formatScore(accessibility) + "\n- **Best Practices**: " + formatScore(bestPractices) + "\n- **SEO**: " + formatScore(seo) + "\n" + metricsSection + "\n*Audit completed automatically after theme deployment*";
 }
 
 /**
@@ -840,10 +679,6 @@ async function createOrUpdatePreviewTheme(
     // Poll theme status every 5 seconds until it's ready
     await waitForThemeReady(storeName, themeId, owner, repo);
 
-    // Run Lighthouse audit on the preview theme
-    const previewUrl = `https://${storeName}.myshopify.com?preview_theme_id=${themeId}`;
-    const lighthouseResults = await runLighthouseAudit(owner, repo, previewUrl);
-
     await commentPreviewThemeId(
       octokit,
       owner,
@@ -851,8 +686,7 @@ async function createOrUpdatePreviewTheme(
       pr.number,
       themeId,
       storeName,
-      "update",
-      lighthouseResults || undefined
+      "update"
     );
     } else {
       console.log(`[${owner}/${repo}] Creating new preview theme...`);
@@ -923,10 +757,6 @@ async function createOrUpdatePreviewTheme(
     // Poll theme status every 5 seconds until it's ready
     await waitForThemeReady(storeName, themeId, owner, repo);
 
-    // Run Lighthouse audit on the preview theme
-    const previewUrl = `https://${storeName}.myshopify.com?preview_theme_id=${themeId}`;
-    const lighthouseResults = await runLighthouseAudit(owner, repo, previewUrl);
-
     await commentPreviewThemeId(
       octokit,
       owner,
@@ -934,8 +764,7 @@ async function createOrUpdatePreviewTheme(
       pr.number,
       themeId,
       storeName,
-      "create",
-      lighthouseResults || undefined
+      "create"
     );
     }
 
