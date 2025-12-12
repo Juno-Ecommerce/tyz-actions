@@ -270,12 +270,7 @@ async function saveThemeIdToDescription(
       .trim();
 
     // Add the Preview Theme ID with warnings and square brackets
-    const themeIdSection = `
-      \n\n\n\n\n\n
-      ⚠️ WARNING: DO NOT REMOVE ⚠️
-      [preview-theme-id:${themeId}]
-      ⚠️ Only remove this if you want to create a new preview theme entirely ⚠️
-    `;
+    const themeIdSection = "\n\n\n\n\n\n⚠️ WARNING: DO NOT REMOVE ⚠️\n[preview-theme-id:" + themeId + "]\n⚠️ Only remove this if you want to create a new preview theme entirely ⚠️\n";
 
     // Append the theme ID section
     updatedBody += themeIdSection;
@@ -328,29 +323,9 @@ async function commentPreviewThemeId(
     ? formatLighthouseResults(lighthouseResults)
     : "\n\n⏳ Calculating Lighthouse score...";
 
-  const createBody = `
-      Preview theme successfully created!
-      \n\n
-      Theme URL: https://${storeName}.myshopify.com?preview_theme_id=${themeId}
-      Customiser URL: https://${storeName}.myshopify.com/admin/themes/${themeId}/editor
-      Code URL: https://${storeName}.myshopify.com/admin/themes/${themeId}
-      \n\n
-      This theme will be updated automatically when you push changes to this PR.
-      \n\n
-      The theme ID has been saved into the PR description. Please only remove this id from your PR description if you want to create a new preview theme.
-      \n\n
-      ${lighthouseSection}
-    `;
+  const createBody = "Preview theme successfully created!\n\nTheme URL: https://" + storeName + ".myshopify.com?preview_theme_id=" + themeId + "\nCustomiser URL: https://" + storeName + ".myshopify.com/admin/themes/" + themeId + "/editor\nCode URL: https://" + storeName + ".myshopify.com/admin/themes/" + themeId + "\n\nThis theme will be updated automatically when you push changes to this PR.\n\nThe theme ID has been saved into the PR description. Please only remove this id from your PR description if you want to create a new preview theme.\n\n" + lighthouseSection;
 
-  const updateBody = `
-      Preview theme successfully updated!
-      \n\n
-      Theme URL: https://${storeName}.myshopify.com?preview_theme_id=${themeId}
-      Customiser URL: https://${storeName}.myshopify.com/admin/themes/${themeId}/editor
-      Code URL: https://${storeName}.myshopify.com/admin/themes/${themeId}
-      \n\n
-      ${lighthouseSection}
-    `;
+  const updateBody = "Preview theme successfully updated!\n\nTheme URL: https://" + storeName + ".myshopify.com?preview_theme_id=" + themeId + "\nCustomiser URL: https://" + storeName + ".myshopify.com/admin/themes/" + themeId + "/editor\nCode URL: https://" + storeName + ".myshopify.com/admin/themes/" + themeId + "\n\n" + lighthouseSection;
 
   try {
     await octokit.request(
@@ -508,43 +483,10 @@ function formatLighthouseResults(results: {
   const { performance, accessibility, bestPractices, seo, metrics } = results;
 
   const metricsSection = metrics
-    ? `
-      ### Performance Metrics
-      - **First Contentful Paint**: ${formatMetric(
-        metrics.firstContentfulPaint,
-        "ms"
-      )}
-      - **Largest Contentful Paint**: ${formatMetric(
-        metrics.largestContentfulPaint,
-        "ms"
-      )}
-      - **Total Blocking Time**: ${formatMetric(
-        metrics.totalBlockingTime,
-        "ms"
-      )}
-      - **Cumulative Layout Shift**: ${formatMetric(
-        metrics.cumulativeLayoutShift,
-        ""
-      )}
-      - **Speed Index**: ${formatMetric(metrics.speedIndex, "ms")}
-    `
+    ? "\n### Performance Metrics\n- **First Contentful Paint**: " + formatMetric(metrics.firstContentfulPaint, "ms") + "\n- **Largest Contentful Paint**: " + formatMetric(metrics.largestContentfulPaint, "ms") + "\n- **Total Blocking Time**: " + formatMetric(metrics.totalBlockingTime, "ms") + "\n- **Cumulative Layout Shift**: " + formatMetric(metrics.cumulativeLayoutShift, "") + "\n- **Speed Index**: " + formatMetric(metrics.speedIndex, "ms") + "\n"
     : "";
 
-  return `
-    ## 🔍 Lighthouse Audit Results
-
-    ⏳ Rendering Lighthouse score...
-
-      ### Scores
-      - **Performance**: ${formatScore(performance)}
-      - **Accessibility**: ${formatScore(accessibility)}
-      - **Best Practices**: ${formatScore(bestPractices)}
-      - **SEO**: ${formatScore(seo)}
-
-      ${metricsSection}
-
-      *Audit completed automatically after theme deployment*
-  `;
+  return "## 🔍 Lighthouse Audit Results\n\n⏳ Rendering Lighthouse score...\n\n### Scores\n- **Performance**: " + formatScore(performance) + "\n- **Accessibility**: " + formatScore(accessibility) + "\n- **Best Practices**: " + formatScore(bestPractices) + "\n- **SEO**: " + formatScore(seo) + "\n" + metricsSection + "\n*Audit completed automatically after theme deployment*";
 }
 
 /**
@@ -995,9 +937,9 @@ async function createOrUpdatePreviewTheme(
       "create",
       lighthouseResults || undefined
     );
-  }
+    }
 
-  // Clean up temporary directory
+    // Clean up temporary directory
   const { rm } = await import("node:fs/promises");
   await rm(tempDir, { recursive: true, force: true }).catch(
     (error: unknown) => {
@@ -1008,7 +950,7 @@ async function createOrUpdatePreviewTheme(
     }
   );
 
-  console.log(`[${owner}/${repo}] Preview theme ready: ${themeUrl}`);
+    console.log(`[${owner}/${repo}] Preview theme ready: ${themeUrl}`);
 }
 
 /**
@@ -1101,8 +1043,8 @@ export async function handlePreviewTheme(
 
     const existingThemeId = await getExistingPreviewThemeId(
       octokit,
-      owner,
-      repo,
+        owner,
+        repo,
       pr.number
     );
 
