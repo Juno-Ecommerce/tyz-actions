@@ -14,6 +14,7 @@
     "@sparticuz/chromium": "^143.0.0",
     "archiver": "^7.0.1",
     "axe-core": "^4.11.0",
+    "csp_evaluator": "^1.1.5",
     "http-link-header": "^1.1.3",
     "jpeg-js": "^0.4.4",
     "js-library-detector": "^6.7.0",
