@@ -11,7 +11,7 @@ export function delay(ms: number): Promise<void> {
  */
 export async function rateLimitedRequest(
   requestFn: () => Promise<any>,
-  retries: number = 20,
+  retries: number = 3,
   baseDelay: number = 1000
 ): Promise<any> {
   for (let attempt = 0; attempt < retries; attempt++) {
