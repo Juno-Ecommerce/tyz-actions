@@ -79,14 +79,11 @@ export async function updateSGCOnParentPush(octokit: any, owner: string, repo: s
       })
     );
 
-    // Create a map of existing files in sgc-${parent} by path
+    // Create a map of existing files in sgc-${parent}
     const sgcFiles = new Map();
-    // Create a set of all blob SHAs that exist in sgc-${parent} (for reuse)
-    const sgcBlobShas = new Set<string>();
     sgcTree.data.tree.forEach((item: any) => {
       if (item.type === "blob") {
         sgcFiles.set(item.path, item.sha);
-        sgcBlobShas.add(item.sha);
       }
     });
 
@@ -97,10 +94,15 @@ export async function updateSGCOnParentPush(octokit: any, owner: string, repo: s
     const treeUpdates: any[] = [];
     let filesUpdated = 0;
     let filesAdded = 0;
-    // Track which blob SHAs we need to fetch (only for blobs that don't exist in target)
-    const blobsToFetch = new Map<string, any>();
 
-    for (const shopifyFile of shopifyFiles) {
+    for (let i = 0; i < shopifyFiles.length; i++) {
+      const shopifyFile = shopifyFiles[i];
+      
+      // Add a small delay between requests to avoid hitting secondary rate limits
+      if (i > 0 && i % 10 === 0) {
+        await delay(500); // Wait 500ms every 10 files
+      }
+
       // Check if this file exists in sgc-${parent}
       if (sgcFiles.has(shopifyFile.path)) {
         // Check if the file content is different
@@ -111,44 +113,12 @@ export async function updateSGCOnParentPush(octokit: any, owner: string, repo: s
         }
       }
 
-      // If the blob SHA already exists in sgc-${parent}, we can reuse it (no API calls needed!)
-      if (sgcBlobShas.has(shopifyFile.sha)) {
-        // Blob already exists in target, just reference it
-        treeUpdates.push({
-          path: shopifyFile.path,
-          mode: shopifyFile.mode,
-          type: "blob",
-          sha: shopifyFile.sha
-        });
-
-        if (sgcFiles.has(shopifyFile.path)) {
-          filesUpdated++;
-          console.log(`[${owner}/${repo}] Updated ${shopifyFile.path} (reused existing blob)`);
-        } else {
-          filesAdded++;
-          console.log(`[${owner}/${repo}] Added ${shopifyFile.path} (reused existing blob)`);
-        }
-      } else {
-        // Blob doesn't exist in target, we need to fetch and create it
-        // Batch these for later to minimize API calls
-        blobsToFetch.set(shopifyFile.sha, shopifyFile);
-      }
-    }
-
-    // Fetch and create blobs only for files that need new blobs
-    let blobFetchCount = 0;
-    for (const [blobSha, shopifyFile] of blobsToFetch.entries()) {
-      // Add a small delay every 10 blob operations to avoid rate limits
-      if (blobFetchCount > 0 && blobFetchCount % 10 === 0) {
-        await delay(500);
-      }
-
       // Get the blob content from ${parent}
-      const blob = await rateLimitedRequest(() =>
+      const blob = await rateLimitedRequest( () =>
         octokit.request("GET /repos/{owner}/{repo}/git/blobs/{file_sha}", {
           owner,
           repo,
-          file_sha: blobSha
+          file_sha: shopifyFile.sha
         })
       );
 
@@ -156,7 +126,7 @@ export async function updateSGCOnParentPush(octokit: any, owner: string, repo: s
       await delay(100);
 
       // Create a new blob in sgc-${parent} with the content from ${parent}
-      const newBlob = await rateLimitedRequest(() =>
+      const newBlob = await rateLimitedRequest( () =>
         octokit.request("POST /repos/{owner}/{repo}/git/blobs", {
           owner,
           repo,
@@ -180,8 +150,6 @@ export async function updateSGCOnParentPush(octokit: any, owner: string, repo: s
         filesAdded++;
         console.log(`[${owner}/${repo}] Added ${shopifyFile.path}`);
       }
-
-      blobFetchCount++;
     }
 
     // Handle deletions: files that exist in sgc-${parent} but not in parent (only in Shopify folders)
