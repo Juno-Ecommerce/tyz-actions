@@ -248,6 +248,7 @@ export async function updateSGCOnParentPush(octokit: any, owner: string, repo: s
       return;
     }
 
+    console.log(`[${owner}/${repo}] Creating tree with ${treeUpdates.length} file updates...`);
     // Create a new tree with the updated files
     const newTree = await rateLimitedRequest( () =>
       octokit.request("POST /repos/{owner}/{repo}/git/trees", {
@@ -257,6 +258,7 @@ export async function updateSGCOnParentPush(octokit: any, owner: string, repo: s
         tree: treeUpdates
       })
     );
+    console.log(`[${owner}/${repo}] Tree created successfully: ${newTree.data.sha}`);
 
     // Create commit message
     const commitParts: string[] = [];
@@ -274,6 +276,7 @@ export async function updateSGCOnParentPush(octokit: any, owner: string, repo: s
     }
     const commitMessage = `Sync Shopify files from ${parent} (${commitParts.join(', ')})`;
 
+    console.log(`[${owner}/${repo}] Creating commit with message: ${commitMessage}`);
     // Create a new commit
     const newCommit = await rateLimitedRequest( () =>
       octokit.request("POST /repos/{owner}/{repo}/git/commits", {
@@ -284,8 +287,10 @@ export async function updateSGCOnParentPush(octokit: any, owner: string, repo: s
         parents: [sgcSha]
       })
     );
+    console.log(`[${owner}/${repo}] Commit created successfully: ${newCommit.data.sha}`);
 
     // Update the sgc-${parent} branch to point to the new commit
+    console.log(`[${owner}/${repo}] Updating ref sgc-${parent} to ${newCommit.data.sha}...`);
     await rateLimitedRequest( () =>
       octokit.request(`PATCH /repos/{owner}/{repo}/git/refs/heads/sgc-${parent}`, {
         owner,
@@ -293,6 +298,7 @@ export async function updateSGCOnParentPush(octokit: any, owner: string, repo: s
         sha: newCommit.data.sha
       })
     );
+    console.log(`[${owner}/${repo}] Ref updated successfully`);
 
     const syncParts: string[] = [];
     if (filesAdded > 0) {
