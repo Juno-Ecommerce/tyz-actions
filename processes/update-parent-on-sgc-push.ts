@@ -65,11 +65,14 @@ export async function updateParentOnSGCPush(octokit: any, owner: string, repo: s
       'templates'
     ];
 
-    // Create a map of existing files in parent
+    // Create a map of existing files in parent by path
     const parentFiles = new Map();
+    // Create a set of all blob SHAs that exist in parent (for reuse)
+    const parentBlobShas = new Set<string>();
     parentTree.data.tree.forEach((item: any) => {
       if (item.type === "blob") {
         parentFiles.set(item.path, item.sha);
+        parentBlobShas.add(item.sha);
       }
     });
 
@@ -81,6 +84,8 @@ export async function updateParentOnSGCPush(octokit: any, owner: string, repo: s
     let filesUpdated = 0;
     let filesAdded = 0;
     let filesDeleted = 0;
+    // Track which blob SHAs we need to fetch (only for blobs that don't exist in target)
+    const blobsToFetch = new Map<string, any>();
 
     for (const sgcFile of sgcFiles) {
       // Only process files in Shopify folders (to match deletion logic)
@@ -100,57 +105,61 @@ export async function updateParentOnSGCPush(octokit: any, owner: string, repo: s
           // File is already up to date, skipping
           continue;
         }
+      }
 
-        // Get the blob content from sgc
-        const blob = await octokit.request("GET /repos/{owner}/{repo}/git/blobs/{file_sha}", {
-          owner,
-          repo,
-          file_sha: sgcFile.sha
-        });
-
-        // Create a new blob in parent with the content from sgc
-        const newBlob = await octokit.request("POST /repos/{owner}/{repo}/git/blobs", {
-          owner,
-          repo,
-          content: blob.data.content,
-          encoding: blob.data.encoding
-        });
-
-        // Add to tree updates
+      // If the blob SHA already exists in parent, we can reuse it (no API calls needed!)
+      if (parentBlobShas.has(sgcFile.sha)) {
+        // Blob already exists in target, just reference it
         treeUpdates.push({
           path: sgcFile.path,
           mode: sgcFile.mode,
           type: "blob",
-          sha: newBlob.data.sha
+          sha: sgcFile.sha
         });
 
+        if (parentFiles.has(sgcFile.path)) {
+          filesUpdated++;
+          console.log(`[${owner}/${repo}] Updated ${sgcFile.path} (reused existing blob)`);
+        } else {
+          filesAdded++;
+          console.log(`[${owner}/${repo}] Added ${sgcFile.path} (reused existing blob)`);
+        }
+      } else {
+        // Blob doesn't exist in target, we need to fetch and create it
+        // Batch these for later to minimize API calls
+        blobsToFetch.set(sgcFile.sha, sgcFile);
+      }
+    }
+
+    // Fetch and create blobs only for files that need new blobs
+    for (const [blobSha, sgcFile] of blobsToFetch.entries()) {
+      // Get the blob content from sgc
+      const blob = await octokit.request("GET /repos/{owner}/{repo}/git/blobs/{file_sha}", {
+        owner,
+        repo,
+        file_sha: blobSha
+      });
+
+      // Create a new blob in parent with the content from sgc
+      const newBlob = await octokit.request("POST /repos/{owner}/{repo}/git/blobs", {
+        owner,
+        repo,
+        content: blob.data.content,
+        encoding: blob.data.encoding
+      });
+
+      // Add to tree updates
+      treeUpdates.push({
+        path: sgcFile.path,
+        mode: sgcFile.mode,
+        type: "blob",
+        sha: newBlob.data.sha
+      });
+
+      if (parentFiles.has(sgcFile.path)) {
         filesUpdated++;
         console.log(`[${owner}/${repo}] Updated ${sgcFile.path}`);
       } else {
-        // File doesn't exist in parent - add it
-        // Get the blob content from sgc
-        const blob = await octokit.request("GET /repos/{owner}/{repo}/git/blobs/{file_sha}", {
-          owner,
-          repo,
-          file_sha: sgcFile.sha
-        });
-
-        // Create a new blob in parent with the content from sgc
-        const newBlob = await octokit.request("POST /repos/{owner}/{repo}/git/blobs", {
-          owner,
-          repo,
-          content: blob.data.content,
-          encoding: blob.data.encoding
-        });
-
-        // Add to tree updates
-        treeUpdates.push({
-          path: sgcFile.path,
-          mode: sgcFile.mode,
-          type: "blob",
-          sha: newBlob.data.sha
-        });
-
         filesAdded++;
         console.log(`[${owner}/${repo}] Added ${sgcFile.path}`);
       }

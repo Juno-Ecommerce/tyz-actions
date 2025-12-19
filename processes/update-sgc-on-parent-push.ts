@@ -69,11 +69,14 @@ export async function updateSGCOnParentPush(octokit: any, owner: string, repo: s
       recursive: "true"
     });
 
-    // Create a map of existing files in sgc-${parent}
+    // Create a map of existing files in sgc-${parent} by path
     const sgcFiles = new Map();
+    // Create a set of all blob SHAs that exist in sgc-${parent} (for reuse)
+    const sgcBlobShas = new Set<string>();
     sgcTree.data.tree.forEach((item: any) => {
       if (item.type === "blob") {
         sgcFiles.set(item.path, item.sha);
+        sgcBlobShas.add(item.sha);
       }
     });
 
@@ -84,6 +87,8 @@ export async function updateSGCOnParentPush(octokit: any, owner: string, repo: s
     const treeUpdates: any[] = [];
     let filesUpdated = 0;
     let filesAdded = 0;
+    // Track which blob SHAs we need to fetch (only for blobs that don't exist in target)
+    const blobsToFetch = new Map<string, any>();
 
     for (const shopifyFile of shopifyFiles) {
       // Check if this file exists in sgc-${parent}
@@ -96,11 +101,37 @@ export async function updateSGCOnParentPush(octokit: any, owner: string, repo: s
         }
       }
 
+      // If the blob SHA already exists in sgc-${parent}, we can reuse it (no API calls needed!)
+      if (sgcBlobShas.has(shopifyFile.sha)) {
+        // Blob already exists in target, just reference it
+        treeUpdates.push({
+          path: shopifyFile.path,
+          mode: shopifyFile.mode,
+          type: "blob",
+          sha: shopifyFile.sha
+        });
+
+        if (sgcFiles.has(shopifyFile.path)) {
+          filesUpdated++;
+          console.log(`[${owner}/${repo}] Updated ${shopifyFile.path} (reused existing blob)`);
+        } else {
+          filesAdded++;
+          console.log(`[${owner}/${repo}] Added ${shopifyFile.path} (reused existing blob)`);
+        }
+      } else {
+        // Blob doesn't exist in target, we need to fetch and create it
+        // Batch these for later to minimize API calls
+        blobsToFetch.set(shopifyFile.sha, shopifyFile);
+      }
+    }
+
+    // Fetch and create blobs only for files that need new blobs
+    for (const [blobSha, shopifyFile] of blobsToFetch.entries()) {
       // Get the blob content from ${parent}
       const blob = await octokit.request("GET /repos/{owner}/{repo}/git/blobs/{file_sha}", {
         owner,
         repo,
-        file_sha: shopifyFile.sha
+        file_sha: blobSha
       });
 
       // Create a new blob in sgc-${parent} with the content from ${parent}
