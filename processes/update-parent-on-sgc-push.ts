@@ -1,4 +1,6 @@
 export async function updateParentOnSGCPush(octokit: any, owner: string, repo: string, parent: "production" | "staging") {
+  const disableStagingJSONSync = false;
+
   try {
     // Get the latest commit SHA from sgc branch
     const sgcRef = await octokit.request(`GET /repos/{owner}/{repo}/git/ref/heads/sgc-${parent}`, {
@@ -29,7 +31,7 @@ export async function updateParentOnSGCPush(octokit: any, owner: string, repo: s
       if (item.type !== "blob") return false;
 
       // If parent is staging, exclude JSON files except for settings_schema.json
-      if (parent === "staging") {
+      if (parent === "staging" && disableStagingJSONSync) {
         const isJsonFile = item.path.endsWith('.json');
         const isSettingsSchema = item.path === 'config/settings_schema.json';
         return !isJsonFile || isSettingsSchema;
@@ -166,7 +168,7 @@ export async function updateParentOnSGCPush(octokit: any, owner: string, repo: s
     }
 
     // Handle deletions: files that exist in parent but not in sgc (only in Shopify folders)
-    for (const [filePath, fileSha] of parentFiles.entries()) {
+    for (const [filePath, _fileSha] of parentFiles.entries()) {
       // Only delete files within Shopify folders
       const isInShopifyFolder = shopifyFolders.some(folder => 
         filePath.startsWith(folder + '/') || filePath === folder
@@ -177,7 +179,7 @@ export async function updateParentOnSGCPush(octokit: any, owner: string, repo: s
       }
 
       // Skip if this file is excluded by the filtering logic (for staging)
-      if (parent === "staging") {
+      if (parent === "staging" && disableStagingJSONSync) {
         const isJsonFile = filePath.endsWith('.json');
         const isSettingsSchema = filePath === 'config/settings_schema.json';
         if (isJsonFile && !isSettingsSchema) {
