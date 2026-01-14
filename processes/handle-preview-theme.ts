@@ -577,6 +577,99 @@ const handleFileUpload = async (
   return resourceUrl;
 };
 
+interface ThemeFileInput {
+  filename: string;
+  content: string;
+}
+
+interface ThemeUpdateResponse {
+  upsertedFiles?: Array<{
+    filename: string;
+  }>;
+  userErrors?: Array<{
+    field: string[];
+    message: string;
+  }>;
+  error?: string;
+}
+
+/**
+ * Updates theme files using themeFilesUpsert, batching files in chunks of 50
+ */
+async function updateThemeFiles(
+  storeName: string,
+  themeId: string,
+  owner: string,
+  repo: string,
+  themeFiles: Array<{ path: string; content: Buffer }>
+): Promise<void> {
+  const apiUrl = "https://tyz-actions-access.vercel.app/api/theme/update";
+  const maxFilesPerBatch = 50;
+
+  // Convert themeFiles to API format
+  const files: ThemeFileInput[] = themeFiles.map((file) => ({
+    filename: file.path,
+    content: file.content.toString("utf8"),
+  }));
+
+  console.log(
+    `[${owner}/${repo}] Updating ${files.length} files in batches of ${maxFilesPerBatch}...`
+  );
+
+  // Process files in batches of 50
+  for (let i = 0; i < files.length; i += maxFilesPerBatch) {
+    const batch = files.slice(i, i + maxFilesPerBatch);
+    const batchNumber = Math.floor(i / maxFilesPerBatch) + 1;
+    const totalBatches = Math.ceil(files.length / maxFilesPerBatch);
+
+    console.log(
+      `[${owner}/${repo}] Processing batch ${batchNumber}/${totalBatches} (${batch.length} files)...`
+    );
+
+    const updateResponse = await fetch(apiUrl, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        shop: `${storeName}.myshopify.com`,
+        themeId: themeId,
+        files: batch,
+      }),
+    });
+
+    if (!updateResponse.ok) {
+      const text = await updateResponse.text().catch(() => "");
+      throw new Error(
+        `[${owner}/${repo}] Theme update API failed for batch ${batchNumber}: ${updateResponse.status} ${updateResponse.statusText} ${text}`
+      );
+    }
+
+    const updateResult = (await updateResponse.json()) as ThemeUpdateResponse;
+
+    if (updateResult.error) {
+      throw new Error(
+        `[${owner}/${repo}] Failed to update theme files in batch ${batchNumber}: ${updateResult.error}`
+      );
+    }
+
+    if (updateResult.userErrors && updateResult.userErrors.length > 0) {
+      const errors = updateResult.userErrors;
+      throw new Error(
+        `[${owner}/${repo}] Failed to update theme files in batch ${batchNumber}: ${JSON.stringify(errors)}`
+      );
+    }
+
+    console.log(
+      `[${owner}/${repo}] Successfully updated batch ${batchNumber}/${totalBatches} (${updateResult.upsertedFiles?.length || batch.length} files)`
+    );
+  }
+
+  console.log(
+    `[${owner}/${repo}] Successfully updated all ${files.length} theme files`
+  );
+}
+
 /**
  * Creates or updates a Shopify preview theme using Admin API
  */
@@ -594,80 +687,18 @@ async function createOrUpdatePreviewTheme(
 
   const themeFiles = getShopifyFiles(owner, repo, tempDir);
 
-  const resourceUrl = await handleFileUpload(
-    storeName,
-    owner,
-    repo,
-    themeFiles,
-    tempDir
-  );
+  let themeId: string;
+  let themeUrl: string;
 
-  if (!resourceUrl)
-    throw new Error("Failed to upload file and get resource URL");
-
-    let themeId: string;
-    let themeUrl: string;
-
-    if (existingThemeId) {
+  if (existingThemeId) {
     console.log(
       `[${owner}/${repo}] Updating existing preview theme ${existingThemeId}...`
-      );
-      
-      themeId = existingThemeId;
-
-    const themeName = `Tryzens/Preview - PR #${
-      pr.number
-    } (${formatDateDDMMYY()})`;
-    const apiUrl = "https://tyz-actions-access.vercel.app/api/theme/update";
-
-    const updateResponse = await fetch(apiUrl, {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify({
-        shop: `${storeName}.myshopify.com`,
-        themeId: existingThemeId,
-        name: themeName,
-      }),
-    });
-
-    if (!updateResponse.ok) {
-      const text = await updateResponse.text().catch(() => "");
-      throw new Error(
-        `[${owner}/${repo}] Theme update API failed: ${updateResponse.status} ${updateResponse.statusText} ${text}`
-      );
-    }
-
-    const updateResult = (await updateResponse.json()) as {
-      theme?: {
-        id: string;
-        name: string;
-      };
-      userErrors?: Array<{ field: string[]; message: string }>;
-      error?: string;
-    };
-
-    console.log(
-      `[${owner}/${repo}] Update result:`,
-      JSON.stringify(updateResult, null, 2)
     );
 
-    if (updateResult.error) {
-      throw new Error(
-        `[${owner}/${repo}] Failed to update theme: ${updateResult.error}`
-      );
-    }
+    themeId = existingThemeId;
 
-    if (updateResult.userErrors && updateResult.userErrors.length > 0) {
-      const errors = updateResult.userErrors;
-      throw new Error(`Failed to update theme: ${JSON.stringify(errors)}`);
-    }
-
-    if (updateResult.theme && updateResult.theme.id) {
-      const themeGid = updateResult.theme.id;
-      themeId = themeGid.split("/").pop() || existingThemeId;
-    }
+    // Update theme files using themeFilesUpsert
+    await updateThemeFiles(storeName, themeId, owner, repo, themeFiles);
 
     themeUrl = `https://${storeName}.myshopify.com/admin/themes/${themeId}`;
     console.log(
@@ -688,8 +719,20 @@ async function createOrUpdatePreviewTheme(
       storeName,
       "update"
     );
-    } else {
-      console.log(`[${owner}/${repo}] Creating new preview theme...`);
+  } else {
+    // For create, we still need to upload the zip file
+    const resourceUrl = await handleFileUpload(
+      storeName,
+      owner,
+      repo,
+      themeFiles,
+      tempDir
+    );
+
+    if (!resourceUrl)
+      throw new Error("Failed to upload file and get resource URL");
+
+    console.log(`[${owner}/${repo}] Creating new preview theme...`);
 
     const themeName = `Tryzens/Preview - PR #${
       pr.number
@@ -766,9 +809,9 @@ async function createOrUpdatePreviewTheme(
       storeName,
       "create"
     );
-    }
+  }
 
-    // Clean up temporary directory
+  // Clean up temporary directory
   const { rm } = await import("node:fs/promises");
   await rm(tempDir, { recursive: true, force: true }).catch(
     (error: unknown) => {
