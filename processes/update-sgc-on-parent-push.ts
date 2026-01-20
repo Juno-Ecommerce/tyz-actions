@@ -1,5 +1,8 @@
 export async function updateSGCOnParentPush(octokit: any, owner: string, repo: string, includeJsonFiles: boolean = false, parent: "staging" | "production") {
   try {
+    // Automatically include JSON files when updating sgc-staging
+    const shouldIncludeJson = includeJsonFiles || parent === "staging";
+
     // Get the latest commit SHA from ${parent} branch
     const parentRef = await octokit.request(`GET /repos/{owner}/{repo}/git/ref/heads/${parent}`, {
       owner,
@@ -49,7 +52,8 @@ export async function updateSGCOnParentPush(octokit: any, owner: string, repo: s
       const isSettingsSchema = item.path === 'config/settings_schema.json';
 
       // Conditionally exclude JSON files based on parameter, but always include settings_schema.json
-      const isNotJson = includeJsonFiles || !item.path.endsWith('.json') || isSettingsSchema;
+      // Automatically include JSON files when updating sgc-staging
+      const isNotJson = shouldIncludeJson || !item.path.endsWith('.json') || isSettingsSchema;
 
       return isInShopifyFolder && isNotJson;
     });
@@ -174,7 +178,7 @@ export async function updateSGCOnParentPush(octokit: any, owner: string, repo: s
       // Check if this file should be excluded based on JSON filtering (same logic as shopifyFiles filter)
       const isSettingsSchema = filePath === 'config/settings_schema.json';
       const isJsonFile = filePath.endsWith('.json');
-      const shouldExcludeJson = !includeJsonFiles && isJsonFile && !isSettingsSchema;
+      const shouldExcludeJson = !shouldIncludeJson && isJsonFile && !isSettingsSchema;
 
       if (shouldExcludeJson) {
         continue; // Skip excluded JSON files
