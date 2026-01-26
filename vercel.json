@@ -3,7 +3,7 @@
   "routes": [{ "src": "/(.*)", "dest": "/api/server" }],
   "functions": {
     "api/**/*.ts": {
-      "maxDuration": 60
+      "maxDuration": 300
     }
   }
 }

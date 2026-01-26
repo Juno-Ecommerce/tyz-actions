@@ -1,30 +1,35 @@
+import { rateLimitedRequest, batchProcess } from "../utils/rate-limited-request.js";
+
 export async function updateParentOnSGCPush(octokit: any, owner: string, repo: string, parent: "production" | "staging") {
   const disableStagingJSONSync = false;
 
   try {
     // Get the latest commit SHA from sgc branch
-    const sgcRef = await octokit.request(`GET /repos/{owner}/{repo}/git/ref/heads/sgc-${parent}`, {
-      owner,
-      repo
-    });
+    const sgcRef = await rateLimitedRequest(
+      () => octokit.request(`GET /repos/{owner}/{repo}/git/ref/heads/sgc-${parent}`, { owner, repo }),
+      { owner, repo, operation: `get sgc-${parent} ref` }
+    );
 
     const sgcSha = sgcRef.data.object.sha;
 
     // Get the current parent branch SHA
-    const parentRef = await octokit.request(`GET /repos/{owner}/{repo}/git/ref/heads/${parent}`, {
-      owner,
-      repo
-    });
+    const parentRef = await rateLimitedRequest(
+      () => octokit.request(`GET /repos/{owner}/{repo}/git/ref/heads/${parent}`, { owner, repo }),
+      { owner, repo, operation: `get ${parent} ref` }
+    );
 
     const parentSha = parentRef.data.object.sha;
 
     // Get the tree of sgc branch to find all files
-    const sgcTree = await octokit.request("GET /repos/{owner}/{repo}/git/trees/{tree_sha}", {
-      owner,
-      repo,
-      tree_sha: sgcSha,
-      recursive: "true"
-    });
+    const sgcTree = await rateLimitedRequest(
+      () => octokit.request("GET /repos/{owner}/{repo}/git/trees/{tree_sha}", {
+        owner,
+        repo,
+        tree_sha: sgcSha,
+        recursive: "true"
+      }),
+      { owner, repo, operation: `get sgc-${parent} tree` }
+    );
 
     // Filter for files, excluding specified files
     const sgcFiles = sgcTree.data.tree.filter((item: any) => {
@@ -48,12 +53,15 @@ export async function updateParentOnSGCPush(octokit: any, owner: string, repo: s
     }
 
     // Get the current parent tree
-    const parentTree = await octokit.request("GET /repos/{owner}/{repo}/git/trees/{tree_sha}", {
-      owner,
-      repo,
-      tree_sha: parentSha,
-      recursive: "true"
-    });
+    const parentTree = await rateLimitedRequest(
+      () => octokit.request("GET /repos/{owner}/{repo}/git/trees/{tree_sha}", {
+        owner,
+        repo,
+        tree_sha: parentSha,
+        recursive: "true"
+      }),
+      { owner, repo, operation: `get ${parent} tree` }
+    );
 
     // Define the specific Shopify folders where deletions are allowed
     const shopifyFolders = [
@@ -134,38 +142,50 @@ export async function updateParentOnSGCPush(octokit: any, owner: string, repo: s
     }
 
     // Fetch and create blobs only for files that need new blobs
-    for (const [blobSha, sgcFile] of blobsToFetch.entries()) {
-      // Get the blob content from sgc
-      const blob = await octokit.request("GET /repos/{owner}/{repo}/git/blobs/{file_sha}", {
-        owner,
-        repo,
-        file_sha: blobSha
-      });
+    // Process in batches with rate limiting
+    const blobEntries = Array.from(blobsToFetch.entries());
+    await batchProcess(
+      blobEntries,
+      async ([blobSha, sgcFile]) => {
+        // Get the blob content from sgc
+        const blob = await rateLimitedRequest(
+          () => octokit.request("GET /repos/{owner}/{repo}/git/blobs/{file_sha}", {
+            owner,
+            repo,
+            file_sha: blobSha
+          }),
+          { owner, repo, operation: `get blob ${sgcFile.path}` }
+        );
 
-      // Create a new blob in parent with the content from sgc
-      const newBlob = await octokit.request("POST /repos/{owner}/{repo}/git/blobs", {
-        owner,
-        repo,
-        content: blob.data.content,
-        encoding: blob.data.encoding
-      });
+        // Create a new blob in parent with the content from sgc
+        const newBlob = await rateLimitedRequest(
+          () => octokit.request("POST /repos/{owner}/{repo}/git/blobs", {
+            owner,
+            repo,
+            content: blob.data.content,
+            encoding: blob.data.encoding
+          }),
+          { owner, repo, operation: `create blob ${sgcFile.path}` }
+        );
 
-      // Add to tree updates
-      treeUpdates.push({
-        path: sgcFile.path,
-        mode: sgcFile.mode,
-        type: "blob",
-        sha: newBlob.data.sha
-      });
+        // Add to tree updates
+        treeUpdates.push({
+          path: sgcFile.path,
+          mode: sgcFile.mode,
+          type: "blob",
+          sha: newBlob.data.sha
+        });
 
-      if (parentFiles.has(sgcFile.path)) {
-        filesUpdated++;
-        console.log(`[${owner}/${repo}] Updated ${sgcFile.path}`);
-      } else {
-        filesAdded++;
-        console.log(`[${owner}/${repo}] Added ${sgcFile.path}`);
-      }
-    }
+        if (parentFiles.has(sgcFile.path)) {
+          filesUpdated++;
+          console.log(`[${owner}/${repo}] Updated ${sgcFile.path}`);
+        } else {
+          filesAdded++;
+          console.log(`[${owner}/${repo}] Added ${sgcFile.path}`);
+        }
+      },
+      { owner, repo, batchSize: 10, delayBetweenBatches: 500, delayBetweenItems: 75 }
+    );
 
     // Handle deletions: files that exist in parent but not in sgc (only in Shopify folders)
     for (const [filePath, _fileSha] of parentFiles.entries()) {
@@ -206,12 +226,15 @@ export async function updateParentOnSGCPush(octokit: any, owner: string, repo: s
     }
 
     // Create a new tree with the updated files
-    const newTree = await octokit.request("POST /repos/{owner}/{repo}/git/trees", {
-      owner,
-      repo,
-      base_tree: parentSha,
-      tree: treeUpdates
-    });
+    const newTree = await rateLimitedRequest(
+      () => octokit.request("POST /repos/{owner}/{repo}/git/trees", {
+        owner,
+        repo,
+        base_tree: parentSha,
+        tree: treeUpdates
+      }),
+      { owner, repo, operation: "create tree" }
+    );
 
     // Create commit message
     const commitParts: string[] = [];
@@ -227,20 +250,26 @@ export async function updateParentOnSGCPush(octokit: any, owner: string, repo: s
     const commitMessage = `Sync files from sgc-${parent} (${commitParts.join(', ')})`;
 
     // Create a new commit
-    const newCommit = await octokit.request("POST /repos/{owner}/{repo}/git/commits", {
-      owner,
-      repo,
-      message: commitMessage,
-      tree: newTree.data.sha,
-      parents: [parentSha]
-    });
+    const newCommit = await rateLimitedRequest(
+      () => octokit.request("POST /repos/{owner}/{repo}/git/commits", {
+        owner,
+        repo,
+        message: commitMessage,
+        tree: newTree.data.sha,
+        parents: [parentSha]
+      }),
+      { owner, repo, operation: "create commit" }
+    );
 
     // Update the parent branch to point to the new commit
-    await octokit.request(`PATCH /repos/{owner}/{repo}/git/refs/heads/${parent}`, {
-      owner,
-      repo,
-      sha: newCommit.data.sha
-    });
+    await rateLimitedRequest(
+      () => octokit.request(`PATCH /repos/{owner}/{repo}/git/refs/heads/${parent}`, {
+        owner,
+        repo,
+        sha: newCommit.data.sha
+      }),
+      { owner, repo, operation: `update ${parent} ref` }
+    );
 
     const syncParts: string[] = [];
     if (filesAdded > 0) {
@@ -261,13 +290,16 @@ export async function updateParentOnSGCPush(octokit: any, owner: string, repo: s
     // If sync fails, try a simpler approach - create a merge commit
     if (error.status === 422 || error.message.includes('conflict')) {
       try {
-        await octokit.request("POST /repos/{owner}/{repo}/merges", {
-          owner,
-          repo,
-          base: parent,
-          head: `sgc-${parent}`,
-          commit_message: `Merge sgc-${parent} into ${parent}`
-        });
+        await rateLimitedRequest(
+          () => octokit.request("POST /repos/{owner}/{repo}/merges", {
+            owner,
+            repo,
+            base: parent,
+            head: `sgc-${parent}`,
+            commit_message: `Merge sgc-${parent} into ${parent}`
+          }),
+          { owner, repo, operation: "fallback merge" }
+        );
         console.log(`[${owner}/${repo}] Fallback: merged sgc-${parent} into ${parent}`);
       } catch (mergeError: any) {
         console.error(`[${owner}/${repo}] Fallback merge also failed:`, mergeError.message);
