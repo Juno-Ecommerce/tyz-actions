@@ -6,7 +6,7 @@ import { IncomingMessage, ServerResponse } from "node:http";
 
 import { updateParentOnSGCPush } from "../processes/update-parent-on-sgc-push.js";
 import { updateStagingOnProductionPush } from "../processes/update-staging-on-production-push.js";
-import { updateSGCOnParentPush } from "../processes/update-sgc-on-parent-push.js";
+import { updateSGCOnParentPush, syncSGCProductionToOneWay } from "../processes/update-sgc-on-parent-push.js";
 import { handlePreviewTheme, deletePreviewTheme } from "../processes/handle-preview-theme.js";
 
 const { APP_ID, PRIVATE_KEY, WEBHOOK_SECRET } = process.env;
@@ -46,6 +46,23 @@ async function checkSgcProductionBranch(octokit: any, owner: string, repo: strin
   }
 }
 
+async function checkSgcOneWayBranch(octokit: any, owner: string, repo: string): Promise<boolean> {
+  try {
+    await octokit.request("GET /repos/{owner}/{repo}/git/ref/heads/sgc-one-way", {
+      owner,
+      repo
+    });
+    if (debug) console.log(`[${owner}/${repo}] ✅ sgc-one-way branch exists`);
+    return true;
+  } catch (error: any) {
+    if (error.status === 404) {
+      if (debug) console.log(`[${owner}/${repo}] ❌ sgc-one-way branch does not exist, skipping`);
+      return false;
+    }
+    throw error;
+  }
+}
+
 webhooks.on("push", async ({ payload }) => {
   const installationId = payload.installation?.id;
   const owner = payload.repository.owner.login;
@@ -69,12 +86,27 @@ webhooks.on("push", async ({ payload }) => {
         await updateParentOnSGCPush(octokit, owner, repo, "production");
       }
 
+      // Always sync to sgc-one-way if it exists (one-way sync)
+      // This ensures sgc-one-way stays in sync regardless of how sgc-production was updated
+      const hasSgcOneWayBranch = await checkSgcOneWayBranch(octokit, owner, repo);
+      if (hasSgcOneWayBranch) {
+        console.log(`[${owner}/${repo}] Syncing sgc-production to sgc-one-way...`);
+        await syncSGCProductionToOneWay(octokit, owner, repo);
+      }
       break;
+
     case "refs/heads/sgc-staging":
       if (headCommitMessage.includes("update from shopify")) {
         await updateParentOnSGCPush(octokit, owner, repo, "staging");
       }
       break;
+
+    case "refs/heads/sgc-one-way":
+      // sgc-one-way is a one-way branch - it receives updates but never syncs back
+      // Skip syncing back to any parent branch
+      console.log(`[${owner}/${repo}] sgc-one-way branch updated - skipping sync back (one-way branch)`);
+      break;
+
     case "refs/heads/production":
       const productionUpdatedFromSGC = async () => {
         console.log(`[${owner}/${repo}] Production Update from SGC! Rebasing Staging Onto Production`);
@@ -100,8 +132,10 @@ webhooks.on("push", async ({ payload }) => {
       }
 
       break;
+
     case "refs/heads/staging":
       await updateSGCOnParentPush(octokit, owner, repo, false, "staging");
+
     default:
       return;
   }
@@ -175,6 +209,13 @@ webhooks.on("pull_request", async ({ payload }) => {
       // Update sgc-production when production is updated
       // Note: staging updates are handled by the push webhook, not here
       await updateSGCOnParentPush(octokit, owner, repo, shouldIncludeJson, "production");
+      
+      // Sync to sgc-one-way if it exists (one-way sync)
+      const hasSgcOneWayBranch = await checkSgcOneWayBranch(octokit, owner, repo);
+      if (hasSgcOneWayBranch) {
+        console.log(`[${owner}/${repo}] Syncing sgc-production to sgc-one-way after production PR merge...`);
+        await syncSGCProductionToOneWay(octokit, owner, repo);
+      }
       break;
     default:
       return;
