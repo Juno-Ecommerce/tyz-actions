@@ -1,15 +1,15 @@
 import { rateLimitedRequest, batchProcess } from "../utils/rate-limited-request.js";
 
 /**
- * Syncs files from sgc-production to sgc-one-way (one-way sync only)
+ * Syncs files from sgc-staging to sgc-one-way (one-way sync only)
  * This branch receives updates but never syncs back to any parent branch
  */
-export async function syncSGCProductionToOneWay(octokit: any, owner: string, repo: string): Promise<void> {
+export async function syncSGCStagingToOneWay(octokit: any, owner: string, repo: string): Promise<void> {
   try {
-    // Get the latest commit SHA from sgc-production branch
+    // Get the latest commit SHA from sgc-staging branch
     const sourceRef = await rateLimitedRequest(
-      () => octokit.request("GET /repos/{owner}/{repo}/git/ref/heads/sgc-production", { owner, repo }),
-      { owner, repo, operation: "get sgc-production ref" }
+      () => octokit.request("GET /repos/{owner}/{repo}/git/ref/heads/sgc-staging", { owner, repo }),
+      { owner, repo, operation: "get sgc-staging ref" }
     );
 
     const sourceSha = sourceRef.data.object.sha;
@@ -30,7 +30,7 @@ export async function syncSGCProductionToOneWay(octokit: any, owner: string, rep
         tree_sha: sourceSha,
         recursive: "true"
       }),
-      { owner, repo, operation: "get sgc-production tree" }
+      { owner, repo, operation: "get sgc-staging tree" }
     );
 
     // Define the specific Shopify folders to sync
@@ -57,10 +57,10 @@ export async function syncSGCProductionToOneWay(octokit: any, owner: string, rep
       return isInShopifyFolder;
     });
 
-    console.log(`[${owner}/${repo}] Found ${shopifyFiles.length} Shopify files in sgc-production to sync to sgc-one-way`);
+    console.log(`[${owner}/${repo}] Found ${shopifyFiles.length} Shopify files in sgc-staging to sync to sgc-one-way`);
 
     if (shopifyFiles.length === 0) {
-      console.log(`[${owner}/${repo}] No Shopify files found in sgc-production to sync`);
+      console.log(`[${owner}/${repo}] No Shopify files found in sgc-staging to sync`);
       return;
     }
 
@@ -136,7 +136,7 @@ export async function syncSGCProductionToOneWay(octokit: any, owner: string, rep
     await batchProcess(
       blobEntries,
       async ([blobSha, shopifyFile]) => {
-        // Get the blob content from sgc-production
+        // Get the blob content from sgc-staging
         const blob = await rateLimitedRequest(
           () => octokit.request("GET /repos/{owner}/{repo}/git/blobs/{file_sha}", {
             owner,
@@ -146,7 +146,7 @@ export async function syncSGCProductionToOneWay(octokit: any, owner: string, rep
           { owner, repo, operation: `get blob ${shopifyFile.path}` }
         );
 
-        // Create a new blob in sgc-one-way with the content from sgc-production
+        // Create a new blob in sgc-one-way with the content from sgc-staging
         const newBlob = await rateLimitedRequest(
           () => octokit.request("POST /repos/{owner}/{repo}/git/blobs", {
             owner,
@@ -176,7 +176,7 @@ export async function syncSGCProductionToOneWay(octokit: any, owner: string, rep
       { owner, repo, batchSize: 10, delayBetweenBatches: 500, delayBetweenItems: 75 }
     );
 
-    // Handle deletions: files that exist in sgc-one-way but not in sgc-production (only in Shopify folders)
+    // Handle deletions: files that exist in sgc-one-way but not in sgc-staging (only in Shopify folders)
     let filesDeleted = 0;
     for (const [filePath, fileSha] of targetFiles.entries()) {
       // Only delete files within Shopify folders
@@ -188,7 +188,7 @@ export async function syncSGCProductionToOneWay(octokit: any, owner: string, rep
         continue; // Skip files outside Shopify folders
       }
 
-      // If file exists in sgc-one-way but not in sgc-production, mark for deletion
+      // If file exists in sgc-one-way but not in sgc-staging, mark for deletion
       if (!sourceFilePaths.has(filePath)) {
         treeUpdates.push({
           path: filePath,
@@ -197,7 +197,7 @@ export async function syncSGCProductionToOneWay(octokit: any, owner: string, rep
           sha: null // Setting sha to null deletes the file
         });
         filesDeleted++;
-        console.log(`[${owner}/${repo}] Deleted ${filePath} (not in sgc-production)`);
+        console.log(`[${owner}/${repo}] Deleted ${filePath} (not in sgc-staging)`);
       }
     }
 
@@ -256,7 +256,7 @@ export async function syncSGCProductionToOneWay(octokit: any, owner: string, rep
     if (filesCleanedUp > 0) {
       commitParts.push(`${filesCleanedUp} cleaned up`);
     }
-    const commitMessage = `Sync Shopify files from sgc-production (${commitParts.join(', ')})`;
+    const commitMessage = `Sync Shopify files from sgc-staging (${commitParts.join(', ')})`;
 
     // Create a new commit
     const newCommit = await rateLimitedRequest(
@@ -294,10 +294,10 @@ export async function syncSGCProductionToOneWay(octokit: any, owner: string, rep
       syncParts.push(`${filesCleanedUp} cleaned up`);
     }
     const totalFiles = filesAdded + filesUpdated + filesDeleted + filesCleanedUp;
-    console.log(`[${owner}/${repo}] Successfully synced ${totalFiles} files from sgc-production to sgc-one-way (${syncParts.join(', ')})`);
+    console.log(`[${owner}/${repo}] Successfully synced ${totalFiles} files from sgc-staging to sgc-one-way (${syncParts.join(', ')})`);
 
   } catch (error: any) {
-    console.error(`[${owner}/${repo}] Error syncing Shopify files from sgc-production to sgc-one-way:`, error.message);
+    console.error(`[${owner}/${repo}] Error syncing Shopify files from sgc-staging to sgc-one-way:`, error.message);
 
     // If sync fails, try a simpler approach - create a merge commit
     if (error.status === 422 || error.message.includes('conflict')) {
@@ -307,12 +307,12 @@ export async function syncSGCProductionToOneWay(octokit: any, owner: string, rep
             owner,
             repo,
             base: "sgc-one-way",
-            head: "sgc-production",
-            commit_message: `Merge sgc-production into sgc-one-way (fallback from Shopify sync)`
+            head: "sgc-staging",
+            commit_message: `Merge sgc-staging into sgc-one-way (fallback from Shopify sync)`
           }),
           { owner, repo, operation: "fallback merge" }
         );
-        console.log(`[${owner}/${repo}] Fallback: merged sgc-production into sgc-one-way`);
+        console.log(`[${owner}/${repo}] Fallback: merged sgc-staging into sgc-one-way`);
       } catch (mergeError: any) {
         console.error(`[${owner}/${repo}] Fallback merge also failed:`, mergeError.message);
       }
