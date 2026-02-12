@@ -604,8 +604,8 @@ function isBinaryFile(filePath: string): boolean {
 
 interface ThemeFileInput {
   filename: string;
-  content?: string;
-  attachment?: string;
+  content: string;
+  encoding?: "base64";
 }
 
 interface ThemeUpdateResponse {
@@ -638,7 +638,8 @@ async function updateThemeFiles(
     if (isBinaryFile(file.path)) {
       return {
         filename: file.path,
-        attachment: file.content.toString("base64"),
+        content: file.content.toString("base64"),
+        encoding: "base64" as const,
       };
     }
     return {
