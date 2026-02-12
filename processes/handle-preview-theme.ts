@@ -577,9 +577,35 @@ const handleFileUpload = async (
   return resourceUrl;
 };
 
+/**
+ * Binary file extensions that must be base64-encoded rather than UTF-8 decoded
+ */
+const BINARY_EXTENSIONS = new Set([
+  ".woff",
+  ".woff2",
+  ".ttf",
+  ".otf",
+  ".eot",
+  ".png",
+  ".jpg",
+  ".jpeg",
+  ".gif",
+  ".webp",
+  ".ico",
+  ".mp4",
+  ".webm",
+  ".pdf",
+]);
+
+function isBinaryFile(filePath: string): boolean {
+  const ext = filePath.slice(filePath.lastIndexOf(".")).toLowerCase();
+  return BINARY_EXTENSIONS.has(ext);
+}
+
 interface ThemeFileInput {
   filename: string;
-  content: string;
+  content?: string;
+  attachment?: string;
 }
 
 interface ThemeUpdateResponse {
@@ -607,10 +633,19 @@ async function updateThemeFiles(
   const maxFilesPerBatch = 50;
 
   // Convert themeFiles to API format
-  const files: ThemeFileInput[] = themeFiles.map((file) => ({
-    filename: file.path,
-    content: file.content.toString("utf8"),
-  }));
+  // Binary files (fonts, images, etc.) must be base64-encoded to avoid corruption
+  const files: ThemeFileInput[] = themeFiles.map((file) => {
+    if (isBinaryFile(file.path)) {
+      return {
+        filename: file.path,
+        attachment: file.content.toString("base64"),
+      };
+    }
+    return {
+      filename: file.path,
+      content: file.content.toString("utf8"),
+    };
+  });
 
   console.log(
     `[${owner}/${repo}] Updating ${files.length} files in batches of ${maxFilesPerBatch}...`
