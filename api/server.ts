@@ -201,12 +201,11 @@ webhooks.on("pull_request", async ({ payload }) => {
       const hasSgcProductionBranch = await checkSgcProductionBranch(octokit, owner, repo);
       if (!hasSgcProductionBranch) return;
 
-      // Check if PR description/body indicates we should include JSON files
-      const prBody = payload.pull_request.body?.toLowerCase() || '';
+      // Check if PR has the 'sync-settings' label to include JSON files
       const prHeadRef = payload.pull_request.head.ref?.toLowerCase() || '';
-      const shouldIncludeJson = prBody.includes('[include-json]') ||
-                                prBody.includes('[sync-json]') ||
-                                prHeadRef.includes('sync/horizon-');
+      const shouldIncludeJson = payload.pull_request.labels?.some(
+        (label: any) => label.name?.toLowerCase() === 'sync-settings'
+      ) || prHeadRef.includes('sync/horizon-');
 
       if (debug) console.log(`[${owner}/${repo}] Including JSON files: ${shouldIncludeJson} (PR head ref: ${payload.pull_request.head.ref})`);
 
