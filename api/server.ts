@@ -19,6 +19,25 @@ const app = new App({ appId: APP_ID!, privateKey: key });
 const webhooks = new Webhooks({ secret: WEBHOOK_SECRET! });
 const debug = false;
 
+/**
+ * Gets a repository variable value. Returns null if the variable doesn't exist.
+ */
+async function getRepoVariable(octokit: any, owner: string, repo: string, name: string): Promise<string | null> {
+  try {
+    const { data } = await octokit.request("GET /repos/{owner}/{repo}/actions/variables/{name}", {
+      owner,
+      repo,
+      name
+    });
+    return data.value;
+  } catch (error: any) {
+    if (error.status === 404) {
+      return null;
+    }
+    throw error;
+  }
+}
+
 function checkInstallationId(payload: any) {
   const installationId = payload.installation?.id;
   if (!installationId) {
@@ -89,7 +108,13 @@ webhooks.on("push", async ({ payload }) => {
 
     case "refs/heads/sgc-staging":
       if (headCommitMessage.includes("update from shopify")) {
-        await updateParentOnSGCPush(octokit, owner, repo, "staging");
+        // Check if settings sync is disabled via repository variable (enabled by default)
+        const disableSettingsSync = await getRepoVariable(octokit, owner, repo, "DISABLE_SETTINGS_SYNC");
+        const settingsSyncDisabled = disableSettingsSync?.toLowerCase() === "true";
+        if (settingsSyncDisabled) {
+          console.log(`[${owner}/${repo}] Settings sync disabled via DISABLE_SETTINGS_SYNC repository variable`);
+        }
+        await updateParentOnSGCPush(octokit, owner, repo, "staging", settingsSyncDisabled);
       }
       break;
 

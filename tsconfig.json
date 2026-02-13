@@ -9,5 +9,5 @@
     "esModuleInterop": true,
     "skipLibCheck": true
   },
-  "include": ["api/server.ts"]
+  "include": ["api/**/*.ts", "processes/**/*.ts", "utils/**/*.ts"]
 }

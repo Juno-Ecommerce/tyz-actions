@@ -1,7 +1,6 @@
 import { rateLimitedRequest, batchProcess } from "../utils/rate-limited-request.js";
 
-export async function updateParentOnSGCPush(octokit: any, owner: string, repo: string, parent: "production" | "staging") {
-  const disableStagingJSONSync = false;
+export async function updateParentOnSGCPush(octokit: any, owner: string, repo: string, parent: "production" | "staging", disableStagingJSONSync: boolean = false) {
 
   try {
     // Get the latest commit SHA from sgc branch
