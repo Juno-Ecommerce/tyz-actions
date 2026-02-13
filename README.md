@@ -336,7 +336,7 @@ All GitHub API calls are wrapped with rate-limiting protection (`utils/rate-limi
 2. Create `sgc-production` and `sgc-staging` branches containing only Shopify theme files
 3. Connect the SGC branches to Shopify via the GitHub Connector
 4. Optionally create `sgc-production-one-way` and/or `sgc-staging-one-way` branches for read-only theme mirrors
-5. Optionally set the `DISABLE_SETTINGS_SYNC` repository variable to control JSON syncing
+5. Optionally set the `DISABLE_SETTINGS_SYNC` repository variable to disable JSON syncing between `production`and `staging`.
 
 ### Development
 
