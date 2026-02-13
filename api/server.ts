@@ -85,23 +85,11 @@ webhooks.on("push", async ({ payload }) => {
       if (headCommitMessage.includes("update from shopify")) {
         await updateParentOnSGCPush(octokit, owner, repo, "production");
       }
-
-      // Sync to sgc-production-one-way if it exists (one-way sync, never syncs back)
-      if (await checkBranchExists(octokit, owner, repo, "sgc-production-one-way")) {
-        console.log(`[${owner}/${repo}] Syncing sgc-production to sgc-production-one-way...`);
-        await syncToOneWayBranch(octokit, owner, repo, "sgc-production", "sgc-production-one-way");
-      }
       break;
 
     case "refs/heads/sgc-staging":
       if (headCommitMessage.includes("update from shopify")) {
         await updateParentOnSGCPush(octokit, owner, repo, "staging");
-      }
-
-      // Sync to sgc-staging-one-way if it exists (one-way sync, never syncs back)
-      if (await checkBranchExists(octokit, owner, repo, "sgc-staging-one-way")) {
-        console.log(`[${owner}/${repo}] Syncing sgc-staging to sgc-staging-one-way...`);
-        await syncToOneWayBranch(octokit, owner, repo, "sgc-staging", "sgc-staging-one-way");
       }
       break;
 
@@ -135,10 +123,22 @@ webhooks.on("push", async ({ payload }) => {
         console.log(`[${owner}/${repo}] Skipping staging update for merge commit to avoid circular updates`);
       }
 
+      // Sync to sgc-production-one-way if it exists (one-way sync, never syncs back)
+      if (await checkBranchExists(octokit, owner, repo, "sgc-production-one-way")) {
+        console.log(`[${owner}/${repo}] Syncing production to sgc-production-one-way...`);
+        await syncToOneWayBranch(octokit, owner, repo, "production", "sgc-production-one-way");
+      }
+
       break;
 
     case "refs/heads/staging":
       await updateSGCOnParentPush(octokit, owner, repo, false, "staging");
+
+      // Sync to sgc-staging-one-way if it exists (one-way sync, never syncs back)
+      if (await checkBranchExists(octokit, owner, repo, "sgc-staging-one-way")) {
+        console.log(`[${owner}/${repo}] Syncing staging to sgc-staging-one-way...`);
+        await syncToOneWayBranch(octokit, owner, repo, "staging", "sgc-staging-one-way");
+      }
       break;
     default:
       return;
