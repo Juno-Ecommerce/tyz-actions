@@ -34,7 +34,7 @@ GitHub Webhooks
        |
        ├── processes/update-parent-on-sgc-push.ts      (sgc-* --> production/staging)
        ├── processes/update-sgc-on-parent-push.ts       (production/staging --> sgc-*)
-       |                                                (production/staging --> *-one-way)
+       |                                                (production/staging --> sgc-*-one-way)
        ├── processes/update-staging-on-production-push.ts (rebase staging onto production)
        └── processes/handle-preview-theme.ts            (create/update/delete preview themes)
 
@@ -64,7 +64,7 @@ All Shopify Admin API calls are proxied through `tyz-actions-access.vercel.app` 
        |                 |                   |
        |                 v                   v
        |          sgc-production        sgc-staging
-       |                 
+       |
        |
        |    (if 'sync-settings' label or sync/horizon-* branch)
        |          JSON files included in sgc-production sync
