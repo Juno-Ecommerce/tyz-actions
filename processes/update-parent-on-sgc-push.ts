@@ -1,7 +1,6 @@
 import { rateLimitedRequest, batchProcess } from "../utils/rate-limited-request.js";
 
-export async function updateParentOnSGCPush(octokit: any, owner: string, repo: string, parent: "production" | "staging", disableStagingJSONSync: boolean = false) {
-
+export async function updateParentOnSGCPush(octokit: any, owner: string, repo: string, parent: "production" | "staging") {
   try {
     // Get the latest commit SHA from sgc branch
     const sgcRef = await rateLimitedRequest(
@@ -30,19 +29,8 @@ export async function updateParentOnSGCPush(octokit: any, owner: string, repo: s
       { owner, repo, operation: `get sgc-${parent} tree` }
     );
 
-    // Filter for files, excluding specified files
-    const sgcFiles = sgcTree.data.tree.filter((item: any) => {
-      if (item.type !== "blob") return false;
-
-      // If parent is staging, exclude JSON files except for settings_schema.json
-      if (parent === "staging" && disableStagingJSONSync) {
-        const isJsonFile = item.path.endsWith('.json');
-        const isSettingsSchema = item.path === 'config/settings_schema.json';
-        return !isJsonFile || isSettingsSchema;
-      }
-
-      return true;
-    });
+    // Filter for blob files only
+    const sgcFiles = sgcTree.data.tree.filter((item: any) => item.type === "blob");
 
     console.log(`[${owner}/${repo}] Found ${sgcFiles.length} files in sgc-${parent}`);
 
@@ -195,15 +183,6 @@ export async function updateParentOnSGCPush(octokit: any, owner: string, repo: s
 
       if (!isInShopifyFolder) {
         continue; // Skip files outside Shopify folders (e.g., build system files)
-      }
-
-      // Skip if this file is excluded by the filtering logic (for staging)
-      if (parent === "staging" && disableStagingJSONSync) {
-        const isJsonFile = filePath.endsWith('.json');
-        const isSettingsSchema = filePath === 'config/settings_schema.json';
-        if (isJsonFile && !isSettingsSchema) {
-          continue; // Skip JSON files in staging (except settings_schema.json)
-        }
       }
 
       // If file exists in parent but not in sgc, mark for deletion
