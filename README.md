@@ -90,7 +90,7 @@ sgc-production push ("Update from Shopify")
 
 sgc-staging push ("Update from Shopify")
   └─> Sync Shopify files from sgc-staging --> staging
-      (full sync can be disabled via DISABLE_SGC_BACK_SYNC repo variable)
+      (DISABLE_SGC_BACK_SYNC restricts to .json files only when enabled)
 
 production push
   ├─> If from Horizon sync or staging merge:
@@ -167,7 +167,7 @@ PR merged into production
 - Reuses existing blobs where possible to minimise API calls
 - Falls back to a merge commit if tree-based sync fails
 
-**SGC back sync control:** The entire sync from `sgc-staging` to `staging` can be disabled via the `DISABLE_SGC_BACK_SYNC` repository variable. When set to `true`, the process does not run at all—no files are synced from `sgc-staging` into `staging`.
+**SGC back sync control:** When `DISABLE_SGC_BACK_SYNC` is set to `true`, only `.json` files are synced from `sgc-staging` into `staging` (no Liquid, CSS, JS, assets, etc.). This lets you pull in settings/config changes from Shopify without overwriting code changes in staging.
 
 ---
 
@@ -267,7 +267,7 @@ PR merged into production
 
 | Variable | Default | Description |
 |----------|---------|-------------|
-| `DISABLE_SGC_BACK_SYNC` | `false` (sync enabled) | Set to `true` to completely disable the sync from `sgc-staging` to `staging`. When set, Shopify pushes to `sgc-staging` will not sync any files into `staging`. Configure via **Settings > Secrets and variables > Actions > Variables**. |
+| `DISABLE_SGC_BACK_SYNC` | `false` (full sync) | Set to `true` to restrict the sync from `sgc-staging` to `staging` to `.json` files only. Code and assets are left untouched. Configure via **Settings > Secrets and variables > Actions > Variables**. |
 
 ---
 
@@ -336,7 +336,7 @@ All GitHub API calls are wrapped with rate-limiting protection (`utils/rate-limi
 2. Create `sgc-production` and `sgc-staging` branches containing only Shopify theme files
 3. Connect the SGC branches to Shopify via the GitHub Connector
 4. Optionally create `sgc-production-one-way` and/or `sgc-staging-one-way` branches for read-only theme mirrors
-5. Optionally set the `DISABLE_SGC_BACK_SYNC` repository variable to disable the sync from `sgc-staging` to `staging`.
+5. Optionally set the `DISABLE_SGC_BACK_SYNC` repository variable to restrict `sgc-staging` → `staging` sync to `.json` files only.
 
 ### Development
 

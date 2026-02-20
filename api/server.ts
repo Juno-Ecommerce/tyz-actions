@@ -108,13 +108,13 @@ webhooks.on("push", async ({ payload }) => {
 
     case "refs/heads/sgc-staging":
       if (headCommitMessage.includes("update from shopify")) {
-        // Check if sync from sgc-staging to staging is disabled via repository variable (enabled by default)
+        // When DISABLE_SGC_BACK_SYNC is set, only sync .json files (no code/assets). Otherwise full sync.
         const disableSgcBackSync = await getRepoVariable(octokit, owner, repo, "DISABLE_SGC_BACK_SYNC");
-        if (disableSgcBackSync?.toLowerCase() === "true") {
-          console.log(`[${owner}/${repo}] SGC-to-staging sync disabled via DISABLE_SGC_BACK_SYNC repository variable - skipping`);
-          break;
+        const jsonOnly = disableSgcBackSync?.toLowerCase() === "true";
+        if (jsonOnly) {
+          console.log(`[${owner}/${repo}] DISABLE_SGC_BACK_SYNC enabled - syncing only .json files from sgc-staging to staging`);
         }
-        await updateParentOnSGCPush(octokit, owner, repo, "staging");
+        await updateParentOnSGCPush(octokit, owner, repo, "staging", jsonOnly);
       }
       break;
 

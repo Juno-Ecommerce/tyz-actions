@@ -1,6 +1,6 @@
 import { rateLimitedRequest, batchProcess } from "../utils/rate-limited-request.js";
 
-export async function updateParentOnSGCPush(octokit: any, owner: string, repo: string, parent: "production" | "staging") {
+export async function updateParentOnSGCPush(octokit: any, owner: string, repo: string, parent: "production" | "staging", jsonOnly: boolean = false) {
   try {
     // Get the latest commit SHA from sgc branch
     const sgcRef = await rateLimitedRequest(
@@ -29,10 +29,14 @@ export async function updateParentOnSGCPush(octokit: any, owner: string, repo: s
       { owner, repo, operation: `get sgc-${parent} tree` }
     );
 
-    // Filter for blob files only
-    const sgcFiles = sgcTree.data.tree.filter((item: any) => item.type === "blob");
-
-    console.log(`[${owner}/${repo}] Found ${sgcFiles.length} files in sgc-${parent}`);
+    // Filter for blob files only; when jsonOnly, restrict to .json files
+    let sgcFiles = sgcTree.data.tree.filter((item: any) => item.type === "blob");
+    if (jsonOnly) {
+      sgcFiles = sgcFiles.filter((item: any) => item.path.endsWith(".json"));
+      console.log(`[${owner}/${repo}] Found ${sgcFiles.length} JSON files in sgc-${parent} (jsonOnly mode)`);
+    } else {
+      console.log(`[${owner}/${repo}] Found ${sgcFiles.length} files in sgc-${parent}`);
+    }
 
     if (sgcFiles.length === 0) {
       console.log(`[${owner}/${repo}] No files found in sgc-${parent}`);
@@ -183,6 +187,11 @@ export async function updateParentOnSGCPush(octokit: any, owner: string, repo: s
 
       if (!isInShopifyFolder) {
         continue; // Skip files outside Shopify folders (e.g., build system files)
+      }
+
+      // When jsonOnly, only delete JSON files (don't touch code/assets)
+      if (jsonOnly && !filePath.endsWith(".json")) {
+        continue;
       }
 
       // If file exists in parent but not in sgc, mark for deletion
