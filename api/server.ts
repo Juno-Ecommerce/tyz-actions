@@ -109,9 +109,9 @@ webhooks.on("push", async ({ payload }) => {
     case "refs/heads/sgc-staging":
       if (headCommitMessage.includes("update from shopify")) {
         // Check if sync from sgc-staging to staging is disabled via repository variable (enabled by default)
-        const disableSettingsSync = await getRepoVariable(octokit, owner, repo, "DISABLE_SETTINGS_SYNC");
-        if (disableSettingsSync?.toLowerCase() === "true") {
-          console.log(`[${owner}/${repo}] SGC-to-staging sync disabled via DISABLE_SETTINGS_SYNC repository variable - skipping`);
+        const disableSgcBackSync = await getRepoVariable(octokit, owner, repo, "DISABLE_SGC_BACK_SYNC");
+        if (disableSgcBackSync?.toLowerCase() === "true") {
+          console.log(`[${owner}/${repo}] SGC-to-staging sync disabled via DISABLE_SGC_BACK_SYNC repository variable - skipping`);
           break;
         }
         await updateParentOnSGCPush(octokit, owner, repo, "staging");
